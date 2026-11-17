@@ -1,0 +1,31 @@
+﻿# 构建产物
+build/
+*.aab
+*.dex
+*.class
+
+# 但 apk/ 目录下的成品要发布
+!apk/
+!apk/*.apk
+
+# 临时文件
+tmp/
+*.log
+
+# Python
+__pycache__/
+*.pyc
+
+# IDE
+.idea/
+*.iml
+.vscode/
+
+# 系统
+.DS_Store
+Thumbs.db
+
+# 签名文件（不要提交）
+*.jks
+release.keystore
+keystore.properties
