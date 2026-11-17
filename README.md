@@ -4,12 +4,6 @@
 
 > 全程后台运行，不占屏幕、不弹页面、没有常驻通知栏。
 
-<p align="center">
-  <img src="screenshots/screenshot-calendar.png" width="300" alt="工时日历">
-  &nbsp;&nbsp;
-  <img src="screenshots/screenshot-settings.png" width="300" alt="权限设置">
-</p>
-
 ---
 
 ## 功能
