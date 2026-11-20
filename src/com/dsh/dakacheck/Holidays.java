@@ -41,6 +41,7 @@ public final class Holidays {
 
     /** 该年是否已从网上拿到数据。 */
     public static boolean isFetched(Context c, int year) {
+        if (sp(c).getBoolean("fetched_" + year, false)) return true;
         String v = sp(c).getString("h_" + year, "");
         return v != null && !v.isEmpty();
     }
@@ -83,6 +84,83 @@ public final class Holidays {
     }
 
     private static void fetch(Context c, int year) {
+        // 主源：api.apihubs.cn，直接给出每天是否工作日（含调休补班）
+        if (fetchApihubs(c, year)) return;
+        // 备用源：timor.tech（可能被 Cloudflare 拦截）
+        fetchTimor(c, year);
+    }
+
+    /**
+     * api.apihubs.cn：每条记录带 workday 字段。
+     *   workday = 1 -> 工作日（含调休补班）
+     *   workday = 2 -> 非工作日（周末或法定假日）
+     */
+    private static boolean fetchApihubs(Context c, int year) {
+        HttpURLConnection conn = null;
+        try {
+            URL url = new URL("https://api.apihubs.cn/holiday/get?year=" + year + "&size=400");
+            conn = (HttpURLConnection) url.openConnection();
+            conn.setConnectTimeout(8000);
+            conn.setReadTimeout(8000);
+            conn.setRequestProperty("User-Agent", "DakaCheck/1.0");
+            StringBuilder sb = new StringBuilder();
+            BufferedReader r = new BufferedReader(
+                    new InputStreamReader(conn.getInputStream(), "UTF-8"));
+            String line;
+            while ((line = r.readLine()) != null) sb.append(line);
+            r.close();
+
+            JSONObject root = new JSONObject(sb.toString());
+            if (root.optInt("code", -1) != 0) return false;
+            JSONObject data = root.optJSONObject("data");
+            if (data == null) return false;
+            org.json.JSONArray list = data.optJSONArray("list");
+            if (list == null || list.length() == 0) return false;
+
+            StringBuilder hs = new StringBuilder();
+            StringBuilder ws = new StringBuilder();
+            int workdays = 0;
+            for (int i = 0; i < list.length(); i++) {
+                JSONObject o = list.optJSONObject(i);
+                if (o == null) continue;
+                String raw = o.optString("date", "");
+                if (raw.length() != 8) continue;
+                String date = raw.substring(0, 4) + "-" + raw.substring(4, 6)
+                        + "-" + raw.substring(6, 8);
+                boolean isWorkday = o.optInt("workday", 0) == 1;
+                if (isWorkday) {
+                    workdays++;
+                    // 周末或法定假日却是工作日 -> 调休补班
+                    boolean weekend = o.optInt("weekend", 0) == 1;
+                    if (weekend) {
+                        if (ws.length() > 0) ws.append(',');
+                        ws.append(date);
+                    }
+                } else {
+                    if (hs.length() > 0) hs.append(',');
+                    hs.append(date);
+                }
+            }
+            if (workdays == 0) return false;
+
+            sp(c).edit()
+                    .putString("h_" + year, hs.toString())
+                    .putString("w_" + year, ws.toString())
+                    .putBoolean("fetched_" + year, true)
+                    .apply();
+            Log.i("Daka", "holidays fetched(apihubs) " + year
+                    + " holiday=" + hs.length() + " makeup=" + ws.length()
+                    + " workdays=" + workdays);
+            return true;
+        } catch (Throwable t) {
+            Log.i("Daka", "apihubs failed " + year + ": " + t);
+            return false;
+        } finally {
+            if (conn != null) conn.disconnect();
+        }
+    }
+
+    private static void fetchTimor(Context c, int year) {
         HttpURLConnection conn = null;
         try {
             URL url = new URL("https://timor.tech/api/holiday/year/" + year);

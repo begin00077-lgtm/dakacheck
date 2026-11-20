@@ -43,12 +43,34 @@ public final class Scheduler {
         if (t.getTimeInMillis() <= now.getTimeInMillis()) {
             t.add(Calendar.DAY_OF_MONTH, 1);
         }
+        // 非工作日不核对打卡：直接跳到下一个工作日，周末/节假日根本不排闹钟
+        int skipped = 0;
+        for (int i = 0; i < 40; i++) {
+            String date = String.format(java.util.Locale.CHINA, "%04d-%02d-%02d",
+                    t.get(Calendar.YEAR), t.get(Calendar.MONTH) + 1,
+                    t.get(Calendar.DAY_OF_MONTH));
+            if (CheckReceiver.isWorkday(c, date)) break;
+            skipped++;
+            t.add(Calendar.DAY_OF_MONTH, 1);
+        }
+        if (skipped > 0) {
+            Log.i("Daka", "alarm " + kind + " skipped " + skipped + " non-workday(s)");
+        }
         return t.getTimeInMillis();
     }
 
     public static void schedule(Context c, String kind) {
         AlarmManager am = (AlarmManager) c.getSystemService(Context.ALARM_SERVICE);
         if (am == null) return;
+        // 总开关关掉：撤掉核对闹钟，不再提醒
+        if (!Config.remindOn(c)) {
+            PendingIntent old = PendingIntent.getBroadcast(c, reqCode(kind),
+                    new Intent(c, CheckReceiver.class).putExtra(CheckReceiver.EXTRA_KIND, kind),
+                    PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
+            am.cancel(old);
+            Log.i("Daka", "remind off, alarm cancelled " + kind);
+            return;
+        }
         long at = nextTrigger(c, kind);
         PendingIntent pi = PendingIntent.getBroadcast(c, reqCode(kind),
                 new Intent(c, CheckReceiver.class).putExtra(CheckReceiver.EXTRA_KIND, kind),

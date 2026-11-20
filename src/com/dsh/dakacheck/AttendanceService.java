@@ -43,6 +43,8 @@ public class AttendanceService extends AccessibilityService {
         }
         Scheduler.ensure(this);
         Log.i("Daka", "service connected");
+        // 服务重连说明进程刚被拉起，顺手补检一次
+        CatchUp.check(this);
     }
 
     private long lastLog = 0L;
@@ -57,10 +59,50 @@ public class AttendanceService extends AccessibilityService {
             Log.i("Daka", "evt " + pkg);
         }
         if (pkg == null || !isTarget(pkg)) return;
-        if (now - lastScan < 1000L) return;
+        // 弹窗只停留 1–2 秒，扫描间隔必须够小才能抓到
+        if (now - lastScan < 400L) return;
         lastScan = now;
         scan();
+        scheduleFollowUp();
     }
+
+    /**
+     * 打完卡后页面往往不会再有明显变化，事件不一定触发。
+     * 打卡 App 在前台时，隔一会儿再补扫几次，确保拿到最新一次打卡时间。
+     */
+    private void scheduleFollowUp() {
+        for (long delay : FOLLOW_UPS) {
+            mainHandler.postDelayed(new Runnable() {
+                @Override
+                public void run() {
+                    if (!isTargetForeground()) return;
+                    long now2 = System.currentTimeMillis();
+                    if (now2 - lastScan < 500L) return;
+                    lastScan = now2;
+                    Log.i("Daka", "scan: follow-up");
+                    scan();
+                }
+            }, delay);
+        }
+    }
+
+    /** 当前前台是不是打卡 App。 */
+    private boolean isTargetForeground() {
+        try {
+            AccessibilityNodeInfo root = getRootInActiveWindow();
+            if (root == null) return false;
+            CharSequence p = root.getPackageName();
+            return p != null && isTarget(p);
+        } catch (Throwable t) {
+            return false;
+        }
+    }
+
+    private final android.os.Handler mainHandler =
+            new android.os.Handler(android.os.Looper.getMainLooper());
+
+    /** 打卡后补扫的时间点（毫秒），覆盖页面异步刷新的情况。 */
+    private static final long[] FOLLOW_UPS = {2000L, 5000L, 10000L, 20000L};
 
     private static boolean isTarget(CharSequence pkg) {
         return TARGET.contentEquals(pkg) || TARGET_WELINK.contentEquals(pkg);
@@ -82,8 +124,13 @@ public class AttendanceService extends AccessibilityService {
         collect(root, texts, 0);
 
         StatusReader.Snapshot s = StatusReader.parse(texts);
+        long nowMs = System.currentTimeMillis();
+        String stampNow = new java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.CHINA)
+                .format(new java.util.Date(nowMs));
         Log.i("Daka", "scan: texts=" + texts.size() + " in=" + s.sawIn + "(" + s.inTime
-                + ") out=" + s.sawOut + "(" + s.outTime + ") date=" + s.date);
+                + ") out=" + s.sawOut + "(" + s.outTime + ") date=" + s.date
+                + " inTimes=" + s.inTimes + " outTimes=" + s.outTimes
+                + " popupIn=" + s.inSuccess + " popupOut=" + s.outSuccess);
 
         boolean attendancePage = s.raw.contains("考勤") || s.raw.contains("签到") || s.raw.contains("签退");
         if (!attendancePage) return;
@@ -92,7 +139,6 @@ public class AttendanceService extends AccessibilityService {
         String date = Store.logicalDate();
         // 这一天确实看到过考勤页：没读到「已签到/已签退」才等于真的没打
         long prevPage = Store.pageAt(this, date);
-        long nowMs = System.currentTimeMillis();
         Store.putPage(this, date, nowMs);
 
         // 页面没显示时间时：优先用「当天第一次读到这页」的时刻（更接近真实打卡点），
@@ -101,11 +147,27 @@ public class AttendanceService extends AccessibilityService {
                 .format(new java.util.Date(prevPage > 0 ? prevPage : nowMs));
         if (s.sawIn) {
             String old = Store.getIn(this, date);
-            Store.putIn(this, date, s.inTime != null ? s.inTime : (old != null && old.length() > 0 ? old : now));
+            String val;
+            if (s.inSuccess) {
+                // 弹窗出现的这一刻就是真实签到时刻，直接覆盖
+                val = stampNow;
+                Log.i("Daka", "popup 签到成功 -> in=" + val);
+            } else {
+                val = s.inTime != null ? s.inTime : (old != null && old.length() > 0 ? old : now);
+            }
+            Store.putIn(this, date, val);
         }
         if (s.sawOut) {
             String old = Store.getOut(this, date);
-            Store.putOut(this, date, s.outTime != null ? s.outTime : (old != null && old.length() > 0 ? old : now));
+            String val;
+            if (s.outSuccess) {
+                // 弹窗出现的这一刻就是真实签退时刻，直接覆盖
+                val = stampNow;
+                Log.i("Daka", "popup 签退成功 -> out=" + val);
+            } else {
+                val = s.outTime != null ? s.outTime : (old != null && old.length() > 0 ? old : now);
+            }
+            Store.putOut(this, date, val);
         }
         Store.setSeen(this);
         Timeline.add(this, "读到页面 上班=" + (s.sawIn ? (s.inTime == null ? "有时间" : s.inTime) : "无")

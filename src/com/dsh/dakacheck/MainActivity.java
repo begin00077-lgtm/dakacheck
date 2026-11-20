@@ -52,11 +52,29 @@ public class MainActivity extends Activity {
         }
     };
 
+    private static Context APP;
+
+    /** 全局 Context，供其它页面写配置用。 */
+    public static Context ctx() {
+        return APP;
+    }
+
+    /** 由 HomeActivity 在启动时设置全局 Context。 */
+    public static void initCtx(Context c) {
+        if (c == null) return;
+        APP = c.getApplicationContext();
+    }
+
     @Override
     protected void onCreate(Bundle savedInstanceState) {
+        APP = getApplicationContext();
         super.onCreate(savedInstanceState);
         setContentView(build());
+        // 节假日/调休数据：打开 App 就联网更新，工作日判断依赖它
+        Holidays.refreshAsync(this);
         Scheduler.ensure(this);
+        // 打开 App 也是补检时机：闹钟万一没响，这里兜住
+        CatchUp.check(this);
         Notify.ensureChannels(this);
         // 不再常驻通知栏：停掉以前的前台服务并清掉残留通知
         try {
@@ -140,35 +158,8 @@ public class MainActivity extends Activity {
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
         int pad = (int) dp(16);
-        root.setPadding(pad, pad, pad, pad);
+        root.setPadding(pad, (int) dp(12), pad, pad);
         root.setBackgroundColor(Color.parseColor("#F5F5F5"));
-
-        LinearLayout header = new LinearLayout(this);
-        header.setOrientation(LinearLayout.HORIZONTAL);
-        header.setGravity(Gravity.CENTER_VERTICAL);
-
-        TextView title = new TextView(this);
-        title.setText("打卡提醒");
-        title.setTextSize(24f);
-        title.setTextColor(Color.parseColor("#111111"));
-        title.setTypeface(null, Typeface.BOLD);
-        header.addView(title, new LinearLayout.LayoutParams(
-                0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
-
-        TextView menu = new TextView(this);
-        menu.setText("⚠ 权限设置与测试 ›");
-        menu.setTextSize(15f);
-        menu.setTextColor(Color.parseColor("#8B0000"));
-        menu.setTypeface(null, Typeface.BOLD);
-        menu.setPadding((int) dp(12), (int) dp(8), 0, (int) dp(8));
-        menu.setOnClickListener(new View.OnClickListener() {
-            @Override
-            public void onClick(View v) {
-                startActivity(new Intent(MainActivity.this, SettingsActivity.class));
-            }
-        });
-        header.addView(menu);
-        root.addView(header);
 
         inCard = card();
         inLabel = cardLabel("上班卡");
@@ -191,40 +182,6 @@ public class MainActivity extends Activity {
         ilp.topMargin = (int) dp(8);
         root.addView(infoBox, ilp);
 
-        TextView sec1 = section("核对时间");
-        root.addView(sec1);
-
-        inTimeBtn = new Button(this);
-        inTimeBtn.setAllCaps(false);
-        inTimeBtn.setTextSize(16f);
-        inTimeBtn.setOnClickListener(new View.OnClickListener() {
-            @Override
-            public void onClick(View v) {
-                pickTime(true);
-            }
-        });
-        root.addView(inTimeBtn, rowLp());
-
-        outTimeBtn = new Button(this);
-        outTimeBtn.setAllCaps(false);
-        outTimeBtn.setTextSize(16f);
-        outTimeBtn.setOnClickListener(new View.OnClickListener() {
-            @Override
-            public void onClick(View v) {
-                pickTime(false);
-            }
-        });
-        root.addView(outTimeBtn, rowLp());
-
-        TextView hint = new TextView(this);
-        hint.setText("考勤日按 04:00 划分：0–4 点之间页面显示的是前一天的考勤，其余时间查当天。");
-        hint.setTextSize(13.5f);
-        hint.setTextColor(Color.parseColor("#444444"));
-        LinearLayout.LayoutParams hlp = new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        hlp.topMargin = (int) dp(2);
-        root.addView(hint, hlp);
-
         root.addView(button("打开软通打卡", new View.OnClickListener() {
             @Override
             public void onClick(View v) {
@@ -238,31 +195,22 @@ public class MainActivity extends Activity {
             }
         }));
 
-        root.addView(button("工时日历", new View.OnClickListener() {
-            @Override
-            public void onClick(View v) {
-                startActivity(new Intent(MainActivity.this, HoursActivity.class));
-            }
-        }));
-
-        // 署名
+        // 署名：只在本页展示
         TextView credit = new TextView(this);
         credit.setText("design by Karl");
         credit.setTextSize(12f);
         credit.setTextColor(Color.parseColor("#999999"));
-        credit.setGravity(Gravity.CENTER);
         credit.setPadding(0, (int) dp(6), 0, (int) dp(6));
         LinearLayout.LayoutParams crLp = new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+                ViewGroup.LayoutParams.MATCH_PARENT, 0);
         crLp.weight = 1f;
-        crLp.gravity = Gravity.BOTTOM;
         credit.setGravity(Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL);
         root.addView(credit, crLp);
 
         // 内容不足一屏时不滚动
         scroll.setFillViewport(true);
         scroll.addView(root);
-        return scroll;
+        return NavBar.attach(this, NavBar.TAB_STATUS, scroll);
     }
 
     /** 弹出作者微信二维码。 */
@@ -485,9 +433,14 @@ public class MainActivity extends Activity {
         infoBox.addView(infoRow("使用记录 ", !usageOn ? "未授权（建议开，用来防误响）"
                 : (lastFg == 0 ? "软通打卡 24 小时内没被打开过" : "软通打卡最近打开 " + fmt(lastFg))));
 
-        inTimeBtn.setText("上班卡核对时间　" + hm(Config.inHour(this), Config.inMin(this)));
-        outTimeBtn.setText("下班卡核对时间　" + hm(Config.outHour(this), Config.outMin(this))
-                + (Config.outTargetsPreviousDay(this) ? "（查前一天）" : "（查当天）"));
+        // 核对时间已移到「提醒设置」页，这里只在控件存在时更新
+        if (inTimeBtn != null) {
+            inTimeBtn.setText("上班卡核对时间　" + hm(Config.inHour(this), Config.inMin(this)));
+        }
+        if (outTimeBtn != null) {
+            outTimeBtn.setText("下班卡核对时间　" + hm(Config.outHour(this), Config.outMin(this))
+                    + (Config.outTargetsPreviousDay(this) ? "（查前一天）" : "（查当天）"));
+        }
     }
 
     private TextView infoRow(String label, String value) {
@@ -551,10 +504,12 @@ public class MainActivity extends Activity {
 
         LinearLayout row1 = new LinearLayout(this);
         row1.setOrientation(LinearLayout.HORIZONTAL);
-        boolean a11yOnline = AttendanceService.connected;
-        boolean a11yEnabled = accessibilityOn();
-        row1.addView(cell("无障碍", a11yOnline,
-                "在线", a11yEnabled ? "未连接" : "已关闭"), halfLp());
+        // 以系统设置为准：设置里开着就是开着。
+        // 进程内的 connected 只作为「服务是否已接管」的补充，避免重建进程后误判成未连接。
+        boolean a11yEnabled = Guard.accessibilityEnabled(this);
+        boolean a11yOnline = a11yEnabled && AttendanceService.connected;
+        row1.addView(cell("无障碍", a11yEnabled,
+                a11yOnline ? "在线" : "已开启", "已关闭"), halfLp());
         row1.addView(reviveCell, halfLp());
         col.addView(row1);
 

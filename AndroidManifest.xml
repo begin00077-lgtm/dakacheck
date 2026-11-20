@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     package="com.dsh.dakacheck"
-    android:versionCode="60"
-    android:versionName="7.0">
+    android:versionCode="80"
+    android:versionName="8.0">
 
     <uses-sdk android:minSdkVersion="26" android:targetSdkVersion="34" />
 
@@ -39,8 +39,10 @@
         android:roundIcon="@mipmap/ic_launcher">
 
         <activity
-            android:name=".MainActivity"
+            android:name=".HomeActivity"
             android:exported="true"
+            android:launchMode="singleTop"
+            android:configChanges="orientation|screenSize|keyboardHidden"
             android:label="@string/app_name"
             android:theme="@android:style/Theme.Material.Light.NoActionBar">
             <intent-filter>
@@ -50,8 +52,23 @@
         </activity>
 
         <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:label="@string/app_name"
+            android:theme="@android:style/Theme.Material.Light.NoActionBar">
+        </activity>
+
+        <activity
             android:name=".SettingsActivity"
             android:exported="false"
+            android:launchMode="singleTop"
+            android:label="@string/app_name"
+            android:theme="@android:style/Theme.Material.Light.NoActionBar" />
+
+        <activity
+            android:name=".RemindActivity"
+            android:exported="false"
+            android:launchMode="singleTop"
             android:label="@string/app_name"
             android:theme="@android:style/Theme.Material.Light.NoActionBar" />
 
@@ -134,6 +151,16 @@
         <receiver
             android:name=".CheckReceiver"
             android:exported="false" />
+
+        <!-- 解锁时补检：防止闹钟被系统清掉导致漏提醒 -->
+        <receiver
+            android:name=".UnlockReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.intent.action.USER_PRESENT" />
+                <action android:name="android.intent.action.USER_UNLOCKED" />
+            </intent-filter>
+        </receiver>
 
         <receiver
             android:name=".WakeReceiver"

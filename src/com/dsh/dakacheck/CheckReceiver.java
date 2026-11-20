@@ -13,6 +13,8 @@ public class CheckReceiver extends BroadcastReceiver {
     public static final String EXTRA_KIND = "kind";
     public static final String EXTRA_TEST = "test";
     public static final String EXTRA_RETRY = "retry";
+    /** 由补检机制触发的（闹钟没响）。 */
+    public static final String EXTRA_CATCHUP = "catchup";
 
     @Override
     public void onReceive(Context c, Intent intent) {
@@ -21,9 +23,18 @@ public class CheckReceiver extends BroadcastReceiver {
         if (kind == null) kind = Scheduler.KIND_IN;
         boolean test = intent.getBooleanExtra(EXTRA_TEST, false);
         int retry = intent.getIntExtra(EXTRA_RETRY, 0);
+        boolean catchUp = intent.getBooleanExtra(EXTRA_CATCHUP, false);
 
         Scheduler.ensure(c);
         Scheduler.ensureKeepAlive(c);
+
+        // 标记「这次核对今天已执行」，补检不会重复触发
+        if (!test) {
+            Store.setCheckedDone(c, Store.logicalDate(), kind);
+        }
+        if (catchUp) {
+            Log.i("Daka", "check(catch-up) " + kind);
+        }
 
         if (test) {
             String t = Scheduler.KIND_OUT.equals(kind)

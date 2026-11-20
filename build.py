@@ -1,4 +1,5 @@
 """Build the 打卡提醒 APK offline: javac -> d8 -> aapt2 -> zipalign -> apksigner."""
+import io
 import os
 import subprocess
 import sys
@@ -7,31 +8,14 @@ import zipfile
 sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 sys.stderr.reconfigure(encoding="utf-8", errors="replace")
 
-HERE = os.path.dirname(os.path.abspath(__file__))
-
-# 支持两种布局：
-#   1) 开发布局：<root>/app + <root>/tools（build.py 在 app/ 里）
-#   2) 发布尃局：本目录就是模块根（src/res/AndroidManifest.xml 同级）
-if os.path.exists(os.path.join(HERE, "AndroidManifest.xml")):
-    APP = HERE
-    ROOT = os.path.dirname(HERE)
-else:
-    ROOT = os.path.dirname(HERE)
-    MODULE = "app"
-    if "--app" in sys.argv:
-        MODULE = sys.argv[sys.argv.index("--app") + 1]
-    APP = os.path.join(ROOT, MODULE)
-
-# tools 目录：同级或上级都找一遍；也可用 ANDROID_TOOLS 环境变量指定
-TOOLS = os.environ.get("ANDROID_TOOLS") or ""
-if not TOOLS:
-    for cand in (os.path.join(ROOT, "tools"), os.path.join(HERE, "tools")):
-        if os.path.isdir(cand):
-            TOOLS = cand
-            break
-
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+TOOLS = os.path.join(ROOT, "tools")
+MODULE = "app"
+if "--app" in sys.argv:
+    MODULE = sys.argv[sys.argv.index("--app") + 1]
+APP = os.path.join(ROOT, MODULE)
 BUILD = os.path.join(APP, "build")
-OUT_NAME = "dakacheck.apk"
+OUT_NAME = "dakawake.apk" if MODULE != "app" else "dakacheck.apk"
 
 
 def find(root, name):
@@ -49,9 +33,7 @@ D8JAR = find(os.path.join(TOOLS, "build-tools"), "d8.jar")
 ZIPALIGN = find(os.path.join(TOOLS, "build-tools"), "zipalign.exe")
 APKSIGNER = find(os.path.join(TOOLS, "build-tools"), "apksigner.jar")
 ANDROID_JAR = find(os.path.join(TOOLS, "platform"), "android.jar")
-KEYSTORE = os.path.join(HERE, "debug.keystore")
-if not os.path.exists(KEYSTORE):
-    KEYSTORE = os.path.join(ROOT, "debug.keystore")
+KEYSTORE = os.path.join(ROOT, "debug.keystore")
 
 
 def run(cmd):
@@ -94,8 +76,13 @@ def dex(classes):
         for f in fn:
             if f.endswith(".class"):
                 classfiles.append(os.path.join(dp, f))
+    # 类文件多时命令行会超长，改用 @argfile 传入
+    argfile = os.path.join(BUILD, "d8_args.txt")
+    with io.open(argfile, "w", encoding="utf-8", newline="\n") as fh:
+        for c in classfiles:
+            fh.write(c.replace("\\", "/") + "\n")
     run([JAVA, "-cp", D8JAR, "com.android.tools.r8.D8", "--min-api", "26",
-         "--lib", ANDROID_JAR, "--output", out] + classfiles)
+         "--lib", ANDROID_JAR, "--output", out, "@" + argfile])
     return os.path.join(out, "classes.dex")
 
 
@@ -130,6 +117,14 @@ def add_dex(base_apk, dex_path):
     return out
 
 
+# 正式签名密钥：优先用发布密钥，找不到再退回 debug
+RELEASE_KS = os.environ.get("DAKA_KS") or os.path.join(
+    os.path.dirname(APP), "dakacheck-release", "signing", "dakacheck.p12")
+RELEASE_ALIAS = os.environ.get("DAKA_ALIAS", "dakacheck")
+RELEASE_STOREPASS = os.environ.get("DAKA_STOREPASS", "dkpass")
+RELEASE_KEYPASS = os.environ.get("DAKA_KEYPASS", RELEASE_STOREPASS)
+
+
 def ensure_keystore():
     if os.path.exists(KEYSTORE):
         return
@@ -140,13 +135,23 @@ def ensure_keystore():
 
 
 def sign(raw_apk):
-    ensure_keystore()
     aligned = os.path.join(BUILD, "aligned.apk")
     out = os.path.join(BUILD, OUT_NAME)
     run([ZIPALIGN, "-f", "-p", "4", raw_apk, aligned])
-    run([JAVA, "-jar", APKSIGNER, "sign", "--ks", KEYSTORE, "--ks-key-alias", "daka",
-         "--ks-pass", "pass:android", "--key-pass", "pass:android",
+
+    if os.path.exists(RELEASE_KS):
+        ks, alias = RELEASE_KS, RELEASE_ALIAS
+        ksp, keyp = RELEASE_STOREPASS, RELEASE_KEYPASS
+        print("signing with release key:", ks)
+    else:
+        ensure_keystore()
+        ks, alias, ksp, keyp = KEYSTORE, "daka", "android", "android"
+        print("WARNING: release keystore not found, falling back to debug key")
+
+    run([JAVA, "-jar", APKSIGNER, "sign", "--ks", ks, "--ks-key-alias", alias,
+         "--ks-pass", "pass:" + ksp, "--key-pass", "pass:" + keyp,
          "--v1-signing-enabled", "false", "--v2-signing-enabled", "true",
+         "--v3-signing-enabled", "true",
          "--out", out, aligned])
     run([JAVA, "-jar", APKSIGNER, "verify", "--print-certs", out])
     print("APK:", out, os.path.getsize(out), "bytes")

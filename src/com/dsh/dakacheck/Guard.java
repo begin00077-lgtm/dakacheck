@@ -17,14 +17,26 @@ public final class Guard {
     private Guard() {
     }
 
+    /** 无障碍服务是否已启用（以系统设置为准，全局唯一口径）。 */
     public static boolean accessibilityEnabled(Context c) {
+        if (c == null) return false;
         try {
-            String enabled = Settings.Secure.getString(c.getContentResolver(),
+            Context app = c.getApplicationContext();
+            String enabled = Settings.Secure.getString(app.getContentResolver(),
                     Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES);
-            if (enabled == null) return false;
-            String flat = new ComponentName(c, AttendanceService.class).flattenToString();
-            for (String s : enabled.split(":")) {
-                if (flat.equalsIgnoreCase(s)) return true;
+            if (enabled == null || enabled.isEmpty()) return false;
+            String on = Settings.Secure.getString(app.getContentResolver(),
+                    Settings.Secure.ACCESSIBILITY_ENABLED);
+            if (!"1".equals(on)) return false;
+            // 直接看服务名是否出现在启用列表里
+            for (String item : enabled.split(":")) {
+                String s = item.trim();
+                int slash = s.indexOf('/');
+                if (slash < 0) continue;
+                if ("com.dsh.dakacheck".equals(s.substring(0, slash))
+                        && s.substring(slash + 1).endsWith("AttendanceService")) {
+                    return true;
+                }
             }
         } catch (Throwable ignored) {
         }

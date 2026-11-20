@@ -44,13 +44,27 @@ public final class Config {
     }
 
 
-    /** 异常提醒开关。 */
+    public static void setInHour(Context c, int h) { setIn(c, h, inMin(c)); }
+    public static void setInMin(Context c, int m) { setIn(c, inHour(c), m); }
+    public static void setOutHour(Context c, int h) { setOut(c, h, outMin(c)); }
+    public static void setOutMin(Context c, int m) { setOut(c, outHour(c), m); }
+
+    /** 打卡提醒总开关（关闭后不排核对闹钟）。 */
+    public static boolean remindOn(Context c) {
+        return sp(c).getBoolean("remind", true);
+    }
+
+    public static void setRemindOn(Context c, boolean on) {
+        sp(c).edit().putBoolean("remind", on).apply();
+    }
+
+    /** 异常提醒永久开启，不再提供开关。 */
     public static boolean kaoqinOn(Context c) {
-        return sp(c).getBoolean("kaoqin", false);
+        return true;
     }
 
     public static void setKaoqin(Context c, boolean on) {
-        sp(c).edit().putBoolean("kaoqin", on).apply();
+        sp(c).edit().putBoolean("kaoqin", true).apply();
     }
 
 

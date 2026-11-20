@@ -31,7 +31,11 @@ public class KaoqinLoginActivity extends Activity {
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         wv = new WebView(this);
-        setContentView(wv, new ViewGroup.LayoutParams(
+        // 用一个 FrameLayout 包住：WebView 永远在最底层，遮罩永远在最上层
+        rootFrame = new android.widget.FrameLayout(this);
+        rootFrame.addView(wv, new android.widget.FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+        setContentView(rootFrame, new ViewGroup.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
 
         WebSettings s = wv.getSettings();
@@ -58,6 +62,7 @@ public class KaoqinLoginActivity extends Activity {
                 WebView.HitTestResult r = view.getHitTestResult();
                 if (r != null && r.getExtra() != null) {
                     Log.i("Daka", "KQL newWin url=" + r.getExtra());
+                    showMask("\u767b\u5f55\u4e2d...");
                     wv.loadUrl(r.getExtra());
                     return false;
                 }
@@ -77,12 +82,35 @@ public class KaoqinLoginActivity extends Activity {
 
         wv.setWebViewClient(new WebViewClient() {
             @Override
+            public void onPageStarted(WebView v, String url, android.graphics.Bitmap favicon) {
+                super.onPageStarted(v, url, favicon);
+                Log.i("Daka", "KQL start " + url);
+                if (url == null) return;
+                if (url.contains("/login")) {
+                    // \u5230\u4e86\u767b\u5f55\u9875\uff1a\u5f7b\u5e95\u64a4\u6389\u906e\u7f69\uff0c\u8ba9\u7528\u6237\u80fd\u8f93\u5165
+                    sawLoginPage = true;
+                    hideMask();
+                } else if (sawLoginPage || loggedInBefore) {
+                    // 1) \u8fd9\u4e00\u8f6e\u5df2\u7ecf\u8fc7\u767b\u5f55\u9875\uff1b\u6216
+                    // 2) \u4e0a\u6b21\u5df2\u767b\u5f55\u8fc7\uff0c\u8fd9\u6b21\u76f4\u63a5\u8df3\u8003\u52e4\u9875
+                    //   -> \u7acb\u523b\u76d6\u4f4f\uff0c\u7edd\u4e0d\u9732\u51fa\u8003\u52e4\u9875
+                    showMask("\u767b\u5f55\u4e2d...");
+                } else {
+                    // \u9996\u6b21\u767b\u5f55\u7684\u521d\u59cb portal \u8df3\u8f6c\uff1a\u4e0d\u76d6\uff0c\u8ba9\u7528\u6237\u770b\u5230\u767b\u5f55\u754c\u9762
+                    Log.i("Daka", "KQL pre-login, no mask");
+                }
+            }
+
+            @Override
             public void onPageFinished(WebView v, String url) {
                 Log.i("Daka", "KQL finish " + url);
                 if (url == null) return;
                 installOpenHook(v);
-                // 一旦离开登录页，立刻盖住页面
-                if (!url.contains("/login")) {
+                if (url.contains("/login")) {
+                    // \u767b\u5f55\u9875\uff1a\u4e0d\u76d6\u906e\u7f69
+                    sawLoginPage = true;
+                    hideMask();
+                } else if (sawLoginPage) {
                     showMask("\u767b\u5f55\u4e2d...");
                 }
                 // 立刻判断：URL 已经是门户/考勤页就不用等
@@ -97,6 +125,9 @@ public class KaoqinLoginActivity extends Activity {
                     if (jumpedToAttendance) return;
                     jumpedToAttendance = true;
                     Log.i("Daka", "KQL portal -> go attendance");
+                    // 门户页已经说明登录态有效：从这里开始全部盖住，绝不露出考勤页
+                    loggedInBefore = true;
+                    showMask("\u767b\u5f55\u4e2d...");
                     v.postDelayed(new Runnable() {
                         @Override
                         public void run() {
@@ -139,6 +170,19 @@ public class KaoqinLoginActivity extends Activity {
                     public void onReceiveValue(String value) {
                         String txt = value == null ? "" : value;
                         Log.i("Daka", "KQL text len=" + txt.length());
+
+                        // 已经离开登录页（出现账号/密码框以外的东西）→ 立刻盖遮罩
+                        boolean stillLogin = txt.contains("\u8bf7\u8f93\u5165\u8d26\u53f7")
+                                || txt.contains("\u8bf7\u8f93\u5165\u5bc6\u7801")
+                                || txt.contains("\u66f4\u591a\u767b\u5f55\u65b9\u5f0f")
+                                || txt.contains("\u94ae\u9489\u5feb\u6377\u767b\u5f55")
+                                || txt.contains("\u4e00\u952e\u767b\u5f55");
+                        if (stillLogin) {
+                            sawLoginPage = true;
+                            hideMask();
+                        } else if (sawLoginPage && !txt.isEmpty()) {
+                            showMask("\u767b\u5f55\u4e2d...");
+                        }
 
                         if (isAttendancePage(txt)) {
                             once(txt);
@@ -226,6 +270,29 @@ public class KaoqinLoginActivity extends Activity {
 
     private android.widget.TextView maskView = null;
     private android.widget.TextView maskSub = null;
+    /** WebView 与遮罩的容器：遮罩始终位于最上层。 */
+    private android.widget.FrameLayout rootFrame = null;
+    /** 是否已经看到过登录页（决定离开登录页后要不要盖遮罩）。 */
+    private boolean sawLoginPage = false;
+    /** 本次会话登录是否已成功（成功后 Cookie 有效，下次会直接跳考勤页）。 */
+    private boolean loggedInBefore = false;
+    private android.view.View maskRoot = null;
+
+    /** 撤掉遮罩（回到登录页时用）。 */
+    private void hideMask() {
+        runOnUiThread(new Runnable() {
+            @Override
+            public void run() {
+                try {
+                    if (maskRoot != null) {
+                        maskRoot.setVisibility(android.view.View.GONE);
+                    }
+                } catch (Throwable t) {
+                    Log.i("Daka", "hideMask fail " + t);
+                }
+            }
+        });
+    }
 
     /** 全屏遮罩：盖住下方网页，只看到提示文字。 */
     private void showMask(final String text) {
@@ -266,11 +333,17 @@ public class KaoqinLoginActivity extends Activity {
                         mask.addView(box, blp);
 
                         android.view.ViewGroup root =
-                                (android.view.ViewGroup) findViewById(android.R.id.content);
+                                rootFrame != null
+                                        ? rootFrame
+                                        : (android.view.ViewGroup) findViewById(android.R.id.content);
                         root.addView(mask, new android.widget.FrameLayout.LayoutParams(
                                 ViewGroup.LayoutParams.MATCH_PARENT,
                                 ViewGroup.LayoutParams.MATCH_PARENT));
+                        // 确保遮罩压在最上层
+                        mask.bringToFront();
+                        maskRoot = mask;
                     }
+                    if (maskRoot != null) maskRoot.setVisibility(android.view.View.VISIBLE);
                     maskView.setText(text);
                     maskSub.setText(text.contains("\u6210\u529f") ? "\u6b63\u5728\u8fd4\u56de..."
                             : (text.contains("\u5931\u8d25") ? "\u8bf7\u91cd\u8bd5" : "\u6b63\u5728\u83b7\u53d6\u8003\u52e4\u6570\u636e"));
@@ -294,6 +367,7 @@ public class KaoqinLoginActivity extends Activity {
     private void once(final String txt) {
         if (handled) return;
         handled = true;
+        loggedInBefore = true;
         Log.i("Daka", "KQL data ready -> success");
         // 先取颜色（按颜色判异常），再弹成功并返回
         ColorParser.sample(wv, new ValueCallback<String>() {

@@ -15,6 +15,16 @@ public final class Store {
     private static final String K_PAGE = "page:";
     private static final String K_SEEN = "seen";
     private static final String K_ISSUE = "issue:";
+    private static final String K_CHECKED = "checked:";
+
+    /** 某天某次核对（上班/下班）是否已经执行过，用于补检去重。 */
+    public static boolean checkedDone(Context c, String date, String kind) {
+        return sp(c).getBoolean(K_CHECKED + date + ":" + kind, false);
+    }
+
+    public static void setCheckedDone(Context c, String date, String kind) {
+        sp(c).edit().putBoolean(K_CHECKED + date + ":" + kind, true).apply();
+    }
 
     private Store() {
     }

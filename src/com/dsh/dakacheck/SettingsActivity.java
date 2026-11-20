@@ -70,25 +70,12 @@ public class SettingsActivity extends Activity {
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
         int pad = (int) dp(16);
-        root.setPadding(pad, pad, pad, pad);
+        root.setPadding(pad, (int) dp(12), pad, pad);
         root.setBackgroundColor(Color.parseColor("#F5F5F5"));
 
         LinearLayout bar = new LinearLayout(this);
         bar.setOrientation(LinearLayout.HORIZONTAL);
         bar.setGravity(Gravity.CENTER_VERTICAL);
-
-        TextView back = new TextView(this);
-        back.setText("‹ 返回");
-        back.setTextSize(16f);
-        back.setTextColor(Color.parseColor("#2E7D32"));
-        back.setPadding(0, (int) dp(6), (int) dp(16), (int) dp(6));
-        back.setOnClickListener(new View.OnClickListener() {
-            @Override
-            public void onClick(View v) {
-                finish();
-            }
-        });
-        bar.addView(back);
 
         View sp = new View(this);
         bar.addView(sp, new LinearLayout.LayoutParams(0,
@@ -229,7 +216,7 @@ public class SettingsActivity extends Activity {
                 }));
 
         scroll.addView(root);
-        return scroll;
+        return NavBar.attach(this, NavBar.TAB_SETTINGS, scroll);
     }
 
     /** 手动补录任意一天的上下班时间。 */

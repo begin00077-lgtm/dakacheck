@@ -19,13 +19,22 @@ import android.widget.Toast;
 
 import java.text.SimpleDateFormat;
 import java.util.Calendar;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.Locale;
 
 /** 工时日历：每天打卡时间 + 工时，左右拖动时相邻月份跟手补位。 */
 public class HoursActivity extends Activity {
     private int year, month;
     private TextView monthTitle, summary, tipView;
-    private android.widget.Switch kaoqinSwitch;
+    private TextView checkView;
+    private LinearLayout checkRow;          // 工时核对结果
+    private LinearLayout tipBox;         // 异常提示容器（可点击折叠）
+    private TextView tipArrow;           // 折叠小三角
+    private TextView tip;                // 异常提示正文
+    private boolean tipExpanded = false;
+    private String lastAbnormalDetail = "";   // 异常描述（放进 ? 说明）
+    private String lastCheckDetail = "";      // 工时核对算法说明
 
     private FrameLayout pager;
     private LinearLayout grid;      // 当前月
@@ -61,6 +70,9 @@ public class HoursActivity extends Activity {
                         Log.i("Daka", "HOURS data changed -> render");
                         render();
                     }
+                    if (isFinishing() || isDestroyed()) {
+                        return;
+                    }
                     if (!loginLostShown && Warden.takeLoginLost(HoursActivity.this)) {
                         loginLostShown = true;
                         Log.i("Daka", "HOURS login lost -> dialog");
@@ -92,52 +104,14 @@ public class HoursActivity extends Activity {
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
         int pad = (int) dp(16);
-        root.setPadding(pad, pad, pad, pad);
+        root.setPadding(pad, (int) dp(18), pad, (int) dp(24));
         root.setBackgroundColor(Color.parseColor("#F5F5F5"));
-
-        LinearLayout bar = new LinearLayout(this);
-        bar.setOrientation(LinearLayout.HORIZONTAL);
-        bar.setGravity(Gravity.CENTER_VERTICAL);
-
-        TextView back = new TextView(this);
-        back.setText("‹ 返回");
-        back.setTextSize(16f);
-        back.setTextColor(Color.parseColor("#2E7D32"));
-        back.setPadding(0, (int) dp(6), (int) dp(16), (int) dp(6));
-        back.setOnClickListener(new View.OnClickListener() {
-            @Override
-            public void onClick(View v) {
-                finish();
-            }
-        });
-        bar.addView(back);
-
-        View spacer = new View(this);
-        bar.addView(spacer, new LinearLayout.LayoutParams(0,
-                ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
-
-        TextView syncBtn = new TextView(this);
-        syncBtn.setText("↻ IPSA同步");
-        syncBtn.setTextSize(15f);
-        syncBtn.setTextColor(Color.parseColor("#2E7D32"));
-        syncBtn.setTypeface(null, Typeface.BOLD);
-        syncBtn.setPadding((int) dp(12), (int) dp(6), (int) dp(4), (int) dp(6));
-        syncBtn.setOnClickListener(new View.OnClickListener() {
-            @Override
-            public void onClick(View v) {
-                syncIpsa();
-            }
-        });
-        bar.addView(syncBtn);
-
-        root.addView(bar);
 
         LinearLayout monthBar = new LinearLayout(this);
         monthBar.setOrientation(LinearLayout.HORIZONTAL);
         monthBar.setGravity(Gravity.CENTER_VERTICAL);
         LinearLayout.LayoutParams mblp = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        mblp.topMargin = (int) dp(16);
 
         TextView prev = new TextView(this);
         prev.setText("‹");
@@ -178,7 +152,7 @@ public class HoursActivity extends Activity {
         week.setOrientation(LinearLayout.HORIZONTAL);
         LinearLayout.LayoutParams wlp = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        wlp.topMargin = (int) dp(12);
+        wlp.topMargin = (int) dp(6);
         String[] names = {"一", "二", "三", "四", "五", "六", "日"};
         for (String n : names) {
             TextView t = new TextView(this);
@@ -191,7 +165,44 @@ public class HoursActivity extends Activity {
         }
         root.addView(week, wlp);
 
-        pager = new FrameLayout(this);
+        pager = new FrameLayout(this) {
+            private float downX, downY;
+            private boolean monthSwipe;
+
+            @Override
+            public boolean dispatchTouchEvent(android.view.MotionEvent e) {
+                switch (e.getActionMasked()) {
+                    case android.view.MotionEvent.ACTION_DOWN:
+                        downX = e.getX();
+                        downY = e.getY();
+                        monthSwipe = false;
+                        break;
+                    case android.view.MotionEvent.ACTION_MOVE: {
+                        float dx = e.getX() - downX;
+                        float dy = e.getY() - downY;
+                        if (Math.abs(dx) > 30 && Math.abs(dx) > Math.abs(dy) * 1.5f) {
+                            monthSwipe = true;
+                        }
+                        if (monthSwipe) return true;   // 左右滑动：自己吃掉，不给子视图
+                        break;
+                    }
+                    case android.view.MotionEvent.ACTION_UP:
+                    case android.view.MotionEvent.ACTION_CANCEL: {
+                        if (monthSwipe) {
+                            float dx = e.getX() - downX;
+                            if (Math.abs(dx) > 80) {
+                                shiftMonth(dx < 0 ? 1 : -1);
+                            }
+                            monthSwipe = false;
+                            return true;
+                        }
+                        break;
+                    }
+                }
+                return super.dispatchTouchEvent(e);
+            }
+        };
+        pager.setTag("nav_no_swipe");   // 日历区域滑动=翻月，不切页面
         LinearLayout.LayoutParams plp = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
         plp.topMargin = (int) dp(6);
@@ -216,7 +227,7 @@ public class HoursActivity extends Activity {
         tools.setGravity(Gravity.CENTER_VERTICAL);
         LinearLayout.LayoutParams toolsLp = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        toolsLp.topMargin = (int) dp(18);
+        toolsLp.topMargin = (int) dp(10);
         tools.setLayoutParams(toolsLp);
 
         TextView fillBtn2 = new TextView(this);
@@ -263,31 +274,22 @@ public class HoursActivity extends Activity {
         tools.addView(toolSpacer2, new LinearLayout.LayoutParams(0,
                 ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
 
-        LinearLayout kaoqinBox = new LinearLayout(this);
-        kaoqinBox.setOrientation(LinearLayout.HORIZONTAL);
-        kaoqinBox.setGravity(Gravity.CENTER_VERTICAL);
-        kaoqinBox.setPadding((int) dp(12), (int) dp(2), (int) dp(6), (int) dp(2));
-        kaoqinBox.setBackground(btnBg(dp(10), "#E8F5E9", "#A5D6A7"));
-
-        TextView kaoqinLabel = new TextView(this);
-        kaoqinLabel.setText("异常提醒");
-        kaoqinLabel.setTextSize(14f);
-        kaoqinLabel.setTextColor(Color.parseColor("#2E7D32"));
-        kaoqinLabel.setTypeface(null, Typeface.BOLD);
-        kaoqinLabel.setPadding(0, 0, (int) dp(6), 0);
-        kaoqinBox.addView(kaoqinLabel);
-
-        kaoqinSwitch = new android.widget.Switch(this);
-        kaoqinSwitch.setChecked(Config.kaoqinOn(this));
-        kaoqinSwitch.setOnCheckedChangeListener(
-                new android.widget.CompoundButton.OnCheckedChangeListener() {
+        // 异常提醒永久开启，这里不再放开关；原位置改为 IPSA 同步
+        TextView syncBtn = new TextView(this);
+        syncBtn.setText("↻ IPSA同步");
+        syncBtn.setTextSize(14f);
+        syncBtn.setTextColor(Color.parseColor("#2E7D32"));
+        syncBtn.setTypeface(null, Typeface.BOLD);
+        syncBtn.setGravity(Gravity.CENTER);
+        syncBtn.setPadding((int) dp(14), (int) dp(9), (int) dp(14), (int) dp(9));
+        syncBtn.setBackground(btnBg(dp(10), "#E8F5E9", "#A5D6A7"));
+        syncBtn.setOnClickListener(new View.OnClickListener() {
             @Override
-            public void onCheckedChanged(android.widget.CompoundButton b, boolean on) {
-                setKaoqinOn(on);
+            public void onClick(View v) {
+                syncIpsa();
             }
         });
-        kaoqinBox.addView(kaoqinSwitch);
-        tools.addView(kaoqinBox);
+        tools.addView(syncBtn);
 
         root.addView(tools);
 
@@ -297,7 +299,7 @@ public class HoursActivity extends Activity {
         sumRow.setGravity(Gravity.CENTER_VERTICAL);
         LinearLayout.LayoutParams slp = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        slp.topMargin = (int) dp(16);
+        slp.topMargin = (int) dp(10);
 
         summary = new TextView(this);
         summary.setTextSize(15f);
@@ -329,71 +331,50 @@ public class HoursActivity extends Activity {
 
         root.addView(sumRow, slp);
 
-        TextView tip = new TextView(this);
-        tipView = tip;
-        tip.setTextSize(12.5f);
-        tip.setTextColor(Color.parseColor("#777777"));
+        // 工时核对行 + 行内 ?
+        checkRow = new LinearLayout(this);
+        checkRow.setOrientation(LinearLayout.HORIZONTAL);
+        checkRow.setGravity(Gravity.CENTER_VERTICAL);
+        LinearLayout.LayoutParams crl = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        crl.topMargin = (int) dp(8);
+
+        checkView = new TextView(this);
+        checkView.setTextSize(14f);
+        checkView.setTypeface(null, Typeface.BOLD);
+        checkRow.addView(checkView, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+
+        TextView checkHelp = helpDot();
+        checkHelp.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                showCheckHelp();
+            }
+        });
+        checkRow.addView(checkHelp);
+        root.addView(checkRow, crl);
+
+        // 异常提醒：每类一行，行尾带 ?
+        tipBox = new LinearLayout(this);
+        tipBox.setOrientation(LinearLayout.VERTICAL);
         LinearLayout.LayoutParams tlp = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
         tlp.topMargin = (int) dp(6);
-        root.addView(tip, tlp);
+        tipBox.setLayoutParams(tlp);
+        root.addView(tipBox);
 
-        scroll.setOnTouchListener(new View.OnTouchListener() {
-            private float downX, downY;
-            private boolean dragging;
-            private int dir = 0;
+        // 兼容旧字段：正文不再单独显示，统一由 tipBox 生成
+        tip = new TextView(this);
+        tipView = tip;
+        tip.setVisibility(View.GONE);
 
-            @Override
-            public boolean onTouch(View v, android.view.MotionEvent e) {
-                switch (e.getActionMasked()) {
-                    case android.view.MotionEvent.ACTION_DOWN:
-                        downX = e.getX();
-                        downY = e.getY();
-                        dragging = false;
-                        dir = 0;
-                        break;
-                    case android.view.MotionEvent.ACTION_MOVE: {
-                        float dx = e.getX() - downX;
-                        float dy = e.getY() - downY;
-                        if (!dragging && Math.abs(dx) > 30
-                                && Math.abs(dx) > Math.abs(dy) * 1.2f) {
-                            dragging = true;
-                        }
-                        if (dragging) {
-                            int w = Math.max(1, grid.getWidth());
-                            int d = dx < 0 ? 1 : -1;
-                            if (d != dir) {
-                                dir = d;
-                                prepareNeighbor(d);
-                            }
-                            grid.setTranslationX(dx);
-                            gridAdj.setTranslationX(dx + d * w);
-                            return true;
-                        }
-                        break;
-                    }
-                    case android.view.MotionEvent.ACTION_UP:
-                    case android.view.MotionEvent.ACTION_CANCEL: {
-                        if (dragging) {
-                            float dx = e.getX() - downX;
-                            int w = Math.max(1, grid.getWidth());
-                            if (dir != 0 && Math.abs(dx) > w * 0.2f) {
-                                commitSwipe(dir, w);
-                            } else {
-                                cancelSwipe(dir, w);
-                            }
-                            dragging = false;
-                            return true;
-                        }
-                        break;
-                    }
-                }
-                return false;
-            }
-        });
+        tipArrow = new TextView(this);
+        tipArrow.setVisibility(View.GONE);
+
 
         scroll.addView(root);
-        return scroll;
+        return NavBar.attach(this, NavBar.TAB_HOURS, scroll);
     }
 
     /** 把相邻月份画进 gridAdj，并按拖动方向摆好位置。 */
@@ -478,70 +459,154 @@ public class HoursActivity extends Activity {
             }
         }
         summary.setText(String.format(Locale.CHINA, "%d 月累计：%.2f 小时　（已统计 %d 天）", month, total, counted));
-        if (tipView != null) {
-            String kq;
-            boolean alert = false;
-            if (!Config.kaoqinOn(this)) {
-                kq = "异常提醒：关";
-            } else {
-                // 按本月的异常记录 + 今天日期重新算，不用旧缓存
-                StringBuilder sb = new StringBuilder();
-                boolean any = false;
-                java.util.Calendar cn = java.util.Calendar.getInstance();
-                int cyy = cn.get(java.util.Calendar.YEAR);
-                int cmm = cn.get(java.util.Calendar.MONTH) + 1;
-                for (int d = 1; d <= daysOf(cyy, cmm); d++) {
-                    String dt = String.format(Locale.CHINA, "%04d-%02d-%02d", cyy, cmm, d);
-                    String iss = Store.getIssue(this, dt);
-                    if (iss == null || iss.isEmpty()) continue;
-                    // 只统计真正的异常：正常/请假/公干 都算正常出勤
-                    if (iss.contains("正常")) continue;
-                    if (iss.contains("请假") || iss.contains("公干") || iss.contains("出差")
-                            || iss.contains("调休") || iss.contains("年假")
-                            || iss.contains("事假") || iss.contains("病假")) continue;
-                    if (sb.length() > 0) sb.append("；");
-                    java.util.Calendar dl = java.util.Calendar.getInstance();
-                    int dyy = cmm < cn.get(java.util.Calendar.MONTH) + 1
-                            ? cn.get(java.util.Calendar.YEAR) + 1 : cn.get(java.util.Calendar.YEAR);
-                    dl.set(dyy, cmm - 1, d, 14, 30, 0);
-                    dl.add(java.util.Calendar.DAY_OF_MONTH, 2);
-                    dl.set(java.util.Calendar.MILLISECOND, 0);
-                    int showDay = dl.get(java.util.Calendar.DAY_OF_MONTH);
-                    boolean waiting = cn.getTimeInMillis() < dl.getTimeInMillis();
+        updateCheck(total, year, month, days);
+        rebuildAbnormal();
+    }
 
-                    String hint;
-                    if (iss.contains("缺勤")) {
-                        // 缺勤：提示去申请外出公干
-                        hint = " 快去申请外出公干，审批完成后次日恢复正常";
-                    } else if (waiting) {
-                        hint = " 若加班到0点后打卡，等待" + showDay + "日刷新考勤";
-                    } else {
-                        hint = " 已超一天仍未更正，请核实后处理";
-                    }
-                    sb.append(cmm).append("月").append(d).append("日【").append(iss).append("】").append(hint);
-                    any = true;
-                }
-                if (any) {
-                    kq = sb.toString();
-                    alert = true;
+    /**
+     * 异常提醒：按异常类型分组，每类一行，行尾带 ? 看解释。
+     *
+     *   异常提醒：【缺勤】11月13日              ?
+     *            【旷工】11月19日              ?
+     * 无异常时显示：异常提醒：无
+     */
+    private void rebuildAbnormal() {
+        if (tipBox == null) return;
+        tipBox.removeAllViews();
+
+        java.util.Calendar cn = java.util.Calendar.getInstance();
+        int cyy = cn.get(java.util.Calendar.YEAR);
+        int cmm = cn.get(java.util.Calendar.MONTH) + 1;
+
+        // 类型 -> 日期列表；同时记录每类给的提示语
+        LinkedHashMap<String, ArrayList<Integer>> groups = new LinkedHashMap<>();
+        LinkedHashMap<String, String> hints = new LinkedHashMap<>();
+
+        for (int d = 1; d <= daysOf(cyy, cmm); d++) {
+            String dt = String.format(Locale.CHINA, "%04d-%02d-%02d", cyy, cmm, d);
+            String iss = Store.getIssue(this, dt);
+            if (iss == null || iss.isEmpty()) continue;
+            if (iss.contains("正常")) continue;
+            if (iss.contains("请假") || iss.contains("公干") || iss.contains("出差")
+                    || iss.contains("调休") || iss.contains("年假")
+                    || iss.contains("事假") || iss.contains("病假")) continue;
+
+            ArrayList<Integer> list = groups.get(iss);
+            if (list == null) {
+                list = new ArrayList<>();
+                groups.put(iss, list);
+            }
+            list.add(d);
+
+            if (!hints.containsKey(iss)) {
+                java.util.Calendar dl = java.util.Calendar.getInstance();
+                dl.set(cyy, cmm - 1, d, 14, 30, 0);
+                dl.add(java.util.Calendar.DAY_OF_MONTH, 2);
+                dl.set(java.util.Calendar.MILLISECOND, 0);
+                int showDay = dl.get(java.util.Calendar.DAY_OF_MONTH);
+                boolean waiting = cn.getTimeInMillis() < dl.getTimeInMillis();
+                String hint;
+                if (iss.contains("缺勤")) {
+                    hint = "快去申请外出公干，审批完成后次日恢复正常。";
+                } else if (waiting) {
+                    hint = "若加班到 0 点后打卡，等待 " + showDay + " 日刷新考勤。";
                 } else {
-                    String r = Warden.lastResult(this);
-                    kq = r.isEmpty() ? "异常提醒：开（还没检查过）" : "考勤：" + r;
+                    hint = "已超一天仍未更正，请核实后处理。";
                 }
+                hints.put(iss, hint);
+            }
+        }
+
+        if (groups.isEmpty()) {
+            LinearLayout row = new LinearLayout(this);
+            row.setOrientation(LinearLayout.HORIZONTAL);
+            row.setGravity(Gravity.CENTER_VERTICAL);
+            TextView tv = new TextView(this);
+            tv.setText("异常提醒：无");
+            tv.setTextSize(13f);
+            tv.setTextColor(Color.parseColor("#2E7D32"));
+            tv.setTypeface(null, Typeface.BOLD);
+            row.addView(tv);
+            tipBox.addView(row);
+            return;
+        }
+
+        for (java.util.Map.Entry<String, ArrayList<Integer>> e : groups.entrySet()) {
+            final String type = e.getKey();
+            final ArrayList<Integer> days = e.getValue();
+            final String hint = hints.get(type);
+
+            LinearLayout row = new LinearLayout(this);
+            row.setOrientation(LinearLayout.HORIZONTAL);
+            row.setGravity(Gravity.CENTER_VERTICAL);
+            if (tipBox.getChildCount() > 0) {
+                row.setPadding(0, (int) dp(3), 0, 0);
             }
 
-            android.text.SpannableStringBuilder ssb =
-                    new android.text.SpannableStringBuilder(kq);
-            if (alert) {
-                int st = ssb.length() - kq.length();
-                ssb.setSpan(new android.text.style.ForegroundColorSpan(
-                                Color.parseColor("#D32F2F")),
-                        st, ssb.length(), android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
-                ssb.setSpan(new android.text.style.StyleSpan(android.graphics.Typeface.BOLD),
-                        st, ssb.length(), android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+            StringBuilder sb = new StringBuilder();
+            sb.append("异常提醒：【").append(type).append("】");
+            for (int i = 0; i < days.size(); i++) {
+                if (i > 0) sb.append("，");
+                sb.append(cmm).append("月").append(days.get(i)).append("日");
             }
-            tipView.setText(ssb);
+
+            TextView tv = new TextView(this);
+            tv.setText(sb.toString());
+            tv.setTextSize(13f);
+            tv.setTextColor(Color.parseColor("#D32F2F"));
+            tv.setTypeface(null, Typeface.BOLD);
+            tv.setMaxLines(2);
+            tv.setEllipsize(android.text.TextUtils.TruncateAt.END);
+            row.addView(tv, new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+
+            TextView dot = helpDot();
+            dot.setOnClickListener(new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    if (isFinishing() || isDestroyed()) return;
+                    new AlertDialog.Builder(HoursActivity.this)
+                            .setTitle("【" + type + "】说明")
+                            .setMessage(hint)
+                            .setPositiveButton("知道了", null)
+                            .show();
+                }
+            });
+            row.addView(dot);
+            tipBox.addView(row);
         }
+    }
+
+    /** 小问号按钮。 */
+    private TextView helpDot() {
+        TextView help = new TextView(this);
+        help.setText("?");
+        help.setTextSize(11f);
+        help.setTextColor(Color.parseColor("#666666"));
+        help.setGravity(Gravity.CENTER);
+        GradientDrawable cbg = new GradientDrawable();
+        cbg.setShape(GradientDrawable.OVAL);
+        cbg.setColor(Color.parseColor("#E0E0E0"));
+        cbg.setStroke((int) dp(1), Color.parseColor("#BDBDBD"));
+        help.setBackground(cbg);
+        LinearLayout.LayoutParams hlp = new LinearLayout.LayoutParams(
+                (int) dp(16), (int) dp(16));
+        hlp.leftMargin = (int) dp(6);
+        help.setLayoutParams(hlp);
+        return help;
+    }
+
+    /** 工时核对算法说明。 */
+    private void showCheckHelp() {
+        if (isFinishing() || isDestroyed()) return;
+        String msg = lastCheckDetail == null || lastCheckDetail.isEmpty()
+                ? "按本月应出勤工作日 × 8 小时计算应完成总量，与实际记录工时相比得出差额。"
+                : lastCheckDetail;
+        new AlertDialog.Builder(this)
+                .setTitle("工时核对说明")
+                .setMessage(msg)
+                .setPositiveButton("知道了", null)
+                .show();
     }
 
     private int daysOf(int y, int m) {
@@ -607,13 +672,13 @@ public class HoursActivity extends Activity {
     }
 
     /** 日历单格高度（dp）。 */
-    private static final float CELL_H = 76f;
+    private static final float CELL_H = 60f;
 
     private View cell(int day, final String date, String inT, String outT, Double hours, boolean rest, String issue) {
         LinearLayout box = new LinearLayout(this);
         box.setOrientation(LinearLayout.VERTICAL);
         box.setGravity(Gravity.CENTER);
-        box.setLayoutParams(new LinearLayout.LayoutParams(0, (int) dp(76), 1f));
+        box.setLayoutParams(new LinearLayout.LayoutParams(0, (int) dp(60), 1f));
 
         GradientDrawable g = new GradientDrawable();
         g.setCornerRadius(0);
@@ -636,7 +701,7 @@ public class HoursActivity extends Activity {
         TextView d = new TextView(this);
         d.setIncludeFontPadding(false);
         d.setText(String.valueOf(day));
-        d.setTextSize(15f);
+        d.setTextSize(14f);
         d.setTextColor(Color.parseColor("#111111"));
         d.setTypeface(null, Typeface.BOLD);
         d.setGravity(Gravity.CENTER);
@@ -645,7 +710,7 @@ public class HoursActivity extends Activity {
         TextView tIn = new TextView(this);
         tIn.setIncludeFontPadding(false);
         tIn.setText(Work.hhmm(inT).equals("--:--") ? "" : Work.hhmm(inT));
-        tIn.setTextSize(8f);
+        tIn.setTextSize(7.5f);
         tIn.setTextColor(Color.parseColor("#2E7D32"));
         tIn.setGravity(Gravity.CENTER);
         box.addView(tIn);
@@ -653,50 +718,47 @@ public class HoursActivity extends Activity {
         TextView tOut = new TextView(this);
         tOut.setIncludeFontPadding(false);
         tOut.setText(Work.hhmm(outT).equals("--:--") ? "" : Work.hhmm(outT));
-        tOut.setTextSize(8f);
+        tOut.setTextSize(7.5f);
         tOut.setTextColor(Color.parseColor("#B26A00"));
         tOut.setGravity(Gravity.CENTER);
         box.addView(tOut);
 
-        // 工时单独一行
+        // 工时单独一行；没有记录用 — 占位，保持行高一致
         TextView h = new TextView(this);
         h.setIncludeFontPadding(false);
         h.setText(hours != null ? String.format(Locale.CHINA, "%.2f", hours) : "");
-        h.setTextSize(10f);
+        h.setTextSize(9.5f);
         h.setTextColor(Color.parseColor("#1B5E20"));
         h.setTypeface(null, Typeface.BOLD);
         h.setGravity(Gravity.CENTER);
         box.addView(h);
 
-        // 考勤状态放在最后一行
-        if (issue != null && !issue.isEmpty()) {
-            TextView mark = new TextView(this);
-            mark.setIncludeFontPadding(false);
-            mark.setText(issue);
-            mark.setTextSize(7.5f);
-            mark.setTextColor(Color.parseColor(isNormal ? "#2E7D32" : "#D32F2F"));
-            mark.setTypeface(null, Typeface.BOLD);
-            mark.setGravity(Gravity.CENTER);
-            box.addView(mark);
-        }
+        // 考勤状态：始终占一行，避免有无异常时行高不一致
+        TextView mark = new TextView(this);
+        mark.setIncludeFontPadding(false);
+        mark.setText(issue == null || issue.isEmpty() ? "" : issue);
+        mark.setTextSize(7f);
+        mark.setTextColor(Color.parseColor(isBad ? "#D32F2F" : "#2E7D32"));
+        mark.setTypeface(null, Typeface.BOLD);
+        mark.setGravity(Gravity.CENTER);
+        box.addView(mark);
 
-        if ((inT != null && !inT.isEmpty()) || (outT != null && !outT.isEmpty())) {
-            box.setOnClickListener(new View.OnClickListener() {
-                @Override
-                public void onClick(View v) {
-                    showDetail(date);
-                }
-            });
-        }
+        // 任何格子都能点：查看详情 + 修改当天工时
+        box.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                showDetail(date);
+            }
+        });
         return box;
     }
 
     private void paintKaoqinBtn(TextView t) {
         boolean on = Config.kaoqinOn(this);
-        t.setTextColor(Color.parseColor("#2E7D32"));
-        if (kaoqinSwitch != null && kaoqinSwitch.isChecked() != on) {
-            kaoqinSwitch.setChecked(on);
+        if (t != null) {
+            t.setTextColor(Color.parseColor("#2E7D32"));
         }
+
     }
 
     /** 点异常提醒：直接打开 IPSA 登录页，登录成功后自动回来。 */
@@ -713,7 +775,7 @@ public class HoursActivity extends Activity {
                 .setNegativeButton("取消", new android.content.DialogInterface.OnClickListener() {
                     @Override
                     public void onClick(android.content.DialogInterface d, int w) {
-                        if (kaoqinSwitch != null) kaoqinSwitch.setChecked(false);
+                        
                     }
                 })
                 .setPositiveButton("确定", new android.content.DialogInterface.OnClickListener() {
@@ -728,7 +790,7 @@ public class HoursActivity extends Activity {
                 .setOnCancelListener(new android.content.DialogInterface.OnCancelListener() {
                     @Override
                     public void onCancel(android.content.DialogInterface d) {
-                        if (kaoqinSwitch != null) kaoqinSwitch.setChecked(false);
+                        
                     }
                 })
                 .show();
@@ -743,19 +805,41 @@ public class HoursActivity extends Activity {
         }
     }
 
-    private void showDetail(String date) {
+    /** 点格子：显示当天打卡明细，可直接改当天工时。 */
+    private void showDetail(final String date) {
         String in = Store.getIn(this, date);
         String out = Store.getOut(this, date);
         Double h = Work.hoursOf(this, date);
         StringBuilder sb = new StringBuilder();
-        sb.append("上班  ").append(in == null || in.isEmpty() ? "未读到" : in).append('\n');
-        sb.append("下班  ").append(out == null || out.isEmpty() ? "未读到" : out).append('\n');
-        sb.append("工时  ").append(h == null ? "—" : String.format(Locale.CHINA, "%.2f 小时", h));
+        sb.append("上班  ").append(in == null || in.isEmpty() ? "-" : in).append('\n');
+        sb.append("下班  ").append(out == null || out.isEmpty() ? "-" : out).append('\n');
+        sb.append("工时  ").append(h == null ? "-" : String.format(Locale.CHINA, "%.2f 小时", h));
         new android.app.AlertDialog.Builder(this)
                 .setTitle(date)
                 .setMessage(sb.toString())
-                .setPositiveButton("知道了", null)
+                .setNegativeButton("取消", null)
+                .setPositiveButton("修改工时", new android.content.DialogInterface.OnClickListener() {
+                    @Override
+                    public void onClick(android.content.DialogInterface d, int w) {
+                        openFillFor(date);
+                    }
+                })
                 .show();
+    }
+
+    /** 跳到工时补录界面，并预设好这一天。 */
+    private void openFillFor(String date) {
+        java.util.Calendar cal = java.util.Calendar.getInstance();
+        String[] p = date.split("-");
+        try {
+            cal.set(Integer.parseInt(p[0]), Integer.parseInt(p[1]) - 1, Integer.parseInt(p[2]));
+        } catch (Throwable ignored) {
+        }
+        // 切到该日期所在月份，再打开补录面板并预填日期
+        year = cal.get(java.util.Calendar.YEAR);
+        month = cal.get(java.util.Calendar.MONTH) + 1;
+        render();
+        showFillPicker(date);
     }
 
     /** 补录面板：滚轮选时间 + 异常提醒开关。 */
@@ -769,6 +853,7 @@ public class HoursActivity extends Activity {
                 .setPositiveButton("去登录", new android.content.DialogInterface.OnClickListener() {
                     @Override
                     public void onClick(android.content.DialogInterface d, int w) {
+                        if (isFinishing() || isDestroyed()) return;
                         startActivity(new Intent(HoursActivity.this, KaoqinLoginActivity.class));
                     }
                 })
@@ -787,6 +872,7 @@ public class HoursActivity extends Activity {
 
     /** 同步失败：弹窗提醒重新登录。 */
     private void showLoginLost() {
+        if (isFinishing() || isDestroyed()) return;
         new AlertDialog.Builder(this)
                 .setTitle("同步失败")
                 .setMessage("需重新登录")
@@ -794,6 +880,7 @@ public class HoursActivity extends Activity {
                 .setPositiveButton("去登录", new android.content.DialogInterface.OnClickListener() {
                     @Override
                     public void onClick(android.content.DialogInterface d, int w) {
+                        if (isFinishing() || isDestroyed()) return;
                         startActivity(new Intent(HoursActivity.this, KaoqinLoginActivity.class));
                     }
                 })
@@ -811,13 +898,90 @@ public class HoursActivity extends Activity {
         }
     }
 
+    /**
+     * 工时核对：公司要求工作日日均 8 小时，本月总工时需达到「工作日数 × 8」。
+     * 只统计到今天为止应完成的工作日，避免月初就显示巨额缺口。
+     */
+    private void updateCheck(double total, int y, int m, int daysInMonth) {
+        if (checkView == null) return;
+        try {
+            java.util.Calendar now = java.util.Calendar.getInstance();
+            int curY = now.get(java.util.Calendar.YEAR);
+            int curM = now.get(java.util.Calendar.MONTH) + 1;
+            int curD = now.get(java.util.Calendar.DAY_OF_MONTH);
+
+            // 本月到目前为止应当出勤的工作日数（只算到当前日期）
+            int lastDay = daysInMonth;
+            if (y == curY && m == curM) {
+                lastDay = curD;
+            } else if (y > curY || (y == curY && m > curM)) {
+                lastDay = 0;   // 未来的月份不核对
+            }
+
+            int workdays = 0;
+            for (int d = 1; d <= lastDay; d++) {
+                String date = String.format(Locale.CHINA, "%04d-%02d-%02d", y, m, d);
+                if (CheckReceiver.isWorkday(this, date)) workdays++;
+            }
+
+            double need = workdays * 8.0;
+            double diff = total - need;
+
+            String sign = diff >= 0 ? "+" : "-";
+            String color = diff >= 0 ? "#2E7D32" : "#C62828";
+            String label = diff >= 0 ? "超出" : "还差";
+
+            if (workdays == 0) {
+                checkView.setTextColor(Color.parseColor("#888888"));
+                checkView.setText("工时核对：本月还没有应出勤的工作日");
+            } else {
+                // 只体现差额：多了 +X.XXh，少了 -X.XXh
+                checkView.setTextColor(Color.parseColor(color));
+                checkView.setText(String.format(Locale.CHINA, "工时核对：%s%.2fh", sign, Math.abs(diff)));
+                lastCheckDetail = String.format(Locale.CHINA,
+                        "本月应出勤 %d 天 × 8 小时 = %.0f 小时\n"
+                                + "已记录 %.2f 小时\n"
+                                + "差额 %s%.2f 小时\n\n"
+                                + "说明：只统计到今天为止应出勤的工作日，周末和法定节假日不计；"
+                                + "调休补班日按工作日计。",
+                        workdays, need, total, sign, Math.abs(diff));
+            }
+        } catch (Throwable t) {
+            checkView.setText("");
+        }
+    }
+
+    /** 异常提示折叠 / 展开。 */
+    private void applyTipState() {
+        if (tip == null || tipArrow == null) return;
+        if (tipExpanded) {
+            tip.setMaxLines(Integer.MAX_VALUE);
+            tip.setEllipsize(null);
+            tipArrow.setText("▴");
+        } else {
+            tip.setMaxLines(1);
+            tip.setEllipsize(android.text.TextUtils.TruncateAt.END);
+            tipArrow.setText("▾");
+        }
+    }
+
     private void showCalendarHelp() {
         String h = Holidays.isFetched(this, year)
                 ? "节假日：" + year + " 年已联网更新（含调休）"
                 : "节假日：暂用内置固定日期，联网后会自动更新";
+        String check = lastCheckDetail == null || lastCheckDetail.isEmpty()
+                ? "工时核对：按本月应出勤工作日 × 8 小时计算差额"
+                : lastCheckDetail;
+        StringBuilder msg = new StringBuilder();
+        msg.append(check);
+        if (lastAbnormalDetail != null && !lastAbnormalDetail.isEmpty()) {
+            msg.append("\n\n异常说明：\n").append(lastAbnormalDetail);
+        }
+        msg.append("\n\n").append(h);
+        msg.append("\n\n工时已扣除 12:00–13:30、17:30–18:00 两段休息");
         new AlertDialog.Builder(this)
                 .setTitle("说明")
-                .setMessage(h + "\n\n工时已扣除 12:00–13:30、17:30–18:00 两段休息")
+                .setMessage(msg.toString())
                 .setPositiveButton("知道了", null)
                 .show();
     }
@@ -832,7 +996,7 @@ public class HoursActivity extends Activity {
                     .setPositiveButton("开启", new android.content.DialogInterface.OnClickListener() {
                         @Override
                         public void onClick(android.content.DialogInterface d, int w) {
-                            if (kaoqinSwitch != null) kaoqinSwitch.setChecked(false);
+                            
                             toggleKaoqin(null);
                         }
                     })
@@ -880,21 +1044,54 @@ public class HoursActivity extends Activity {
     }
 
     private void showFillPicker() {
-        final String[] date = {Store.logicalDate()};
+        showFillPicker(Store.logicalDate());
+    }
+
+    /** 打开补录面板；presetDate 不为空时预填该日期。 */
+    private void showFillPicker(String presetDate) {
+        showFillPicker(presetDate, presetDate != null);
+    }
+
+    private void showFillPicker(String presetDate, boolean lockDate) {
+        final String[] date = {presetDate == null ? Store.logicalDate() : presetDate};
 
         LinearLayout box = new LinearLayout(this);
         box.setOrientation(LinearLayout.VERTICAL);
         int pad = (int) dp(16);
         box.setPadding(pad, (int) dp(8), pad, 0);
 
-        // 日期
+        // 日期：可点时有明显边框，锁定时灰底提示
         final TextView dateRow = new TextView(this);
         dateRow.setTextSize(16f);
-        dateRow.setTextColor(Color.parseColor("#2E7D32"));
         dateRow.setTypeface(null, Typeface.BOLD);
-        dateRow.setPadding(0, 0, 0, (int) dp(10));
-        dateRow.setText("日期  " + date[0] + "   （点此更换）");
-        box.addView(dateRow);
+        dateRow.setGravity(Gravity.CENTER);
+        dateRow.setPadding(0, (int) dp(10), 0, (int) dp(10));
+        if (lockDate) {
+            dateRow.setText("日期  " + date[0] + "   （已锁定）");
+            dateRow.setTextColor(Color.parseColor("#888888"));
+            GradientDrawable lbg = new GradientDrawable();
+            lbg.setCornerRadius(dp(10));
+            lbg.setColor(Color.parseColor("#F0F0F0"));
+            dateRow.setBackground(lbg);
+        } else {
+            dateRow.setText("日期  " + date[0] + "   ▾ 点击更换");
+            dateRow.setTextColor(Color.parseColor("#2E7D32"));
+            GradientDrawable cbg2 = new GradientDrawable();
+            cbg2.setCornerRadius(dp(10));
+            cbg2.setColor(Color.parseColor("#E8F5E9"));
+            cbg2.setStroke((int) dp(1.5f), Color.parseColor("#2E7D32"));
+            dateRow.setBackground(cbg2);
+            dateRow.setOnClickListener(new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    pickDate(date, dateRow);
+                }
+            });
+        }
+        LinearLayout.LayoutParams dlp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        dlp.bottomMargin = (int) dp(10);
+        box.addView(dateRow, dlp);
 
         // 上下班滚轮
         final android.widget.NumberPicker inH = wheel(0, 23);
@@ -951,22 +1148,7 @@ public class HoursActivity extends Activity {
 
         applyWheels(date[0], inH, inM, outH, outM);
 
-        dateRow.setOnClickListener(new View.OnClickListener() {
-            @Override
-            public void onClick(View v) {
-                String[] p = date[0].split("-");
-                new android.app.DatePickerDialog(HoursActivity.this,
-                        new android.app.DatePickerDialog.OnDateSetListener() {
-                            @Override
-                            public void onDateSet(android.widget.DatePicker dp2, int yy, int mm, int dd) {
-                                date[0] = String.format(Locale.CHINA, "%04d-%02d-%02d", yy, mm + 1, dd);
-                                dateRow.setText("日期  " + date[0] + "   （点此更换）");
-                                applyWheels(date[0], inH, inM, outH, outM);
-                            }
-                        }, Integer.parseInt(p[0]), Integer.parseInt(p[1]) - 1,
-                        Integer.parseInt(p[2])).show();
-            }
-        });
+        // 点击监听已在上面按 lockDate 决定，这里不再重复设置
 
         new android.app.AlertDialog.Builder(this)
                 .setTitle("工时补录")
@@ -989,6 +1171,20 @@ public class HoursActivity extends Activity {
                     }
                 })
                 .show();
+    }
+
+    /** 补录面板里更换日期（只有「工时补录」入口可用）。 */
+    private void pickDate(final String[] date, final TextView dateRow) {
+        String[] p = date[0].split("-");
+        new android.app.DatePickerDialog(this,
+                new android.app.DatePickerDialog.OnDateSetListener() {
+                    @Override
+                    public void onDateSet(android.widget.DatePicker dp2, int yy, int mm, int dd) {
+                        date[0] = String.format(Locale.CHINA, "%04d-%02d-%02d", yy, mm + 1, dd);
+                        dateRow.setText("日期  " + date[0] + "   ▾ 点击更换");
+                    }
+                }, Integer.parseInt(p[0]), Integer.parseInt(p[1]) - 1,
+                Integer.parseInt(p[2])).show();
     }
 
     private android.widget.NumberPicker wheel(int min, int max) {
