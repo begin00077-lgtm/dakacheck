@@ -199,6 +199,20 @@ public class SettingsPage extends BasePage {
                     }
                 }));
 
+        root.addView(row("清理更新缓存", null,
+                "删除已下载的安装包", new Runnable() {
+                    public void run() {
+                        final int n = ApkProvider.purgeAll(ctx);
+                        new android.app.AlertDialog.Builder(host)
+                                .setTitle("清理完成")
+                                .setMessage(n > 0
+                                        ? "已删除 " + n + " 个安装包。"
+                                        : "没有需要清理的安装包。")
+                                .setPositiveButton("知道了", null)
+                                .show();
+                    }
+                }));
+
         root.addView(section("测试"));
 
         root.addView(row("试响一次", null,

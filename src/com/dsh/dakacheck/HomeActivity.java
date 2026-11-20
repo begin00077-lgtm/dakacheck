@@ -35,6 +35,21 @@ public class HomeActivity extends Activity implements PagerHost.Bridge {
         pager.buildAll();
     }
 
+    /** 从登录页 / 系统设置返回时，让所有页面重新刷新。 */
+    @Override
+    protected void onResume() {
+        super.onResume();
+        if (statusPage != null) {
+            statusPage.refresh();
+        }
+        if (hoursPage != null) {
+            hoursPage.onShown();
+        }
+        if (remindPage != null) {
+            remindPage.onShown();
+        }
+    }
+
     @Override
     public View createPage(int tab) {
         switch (tab) {

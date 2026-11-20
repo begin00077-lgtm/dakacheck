@@ -38,6 +38,23 @@ public class HoursPage extends BasePage {
     private LinearLayout grid;
     private LinearLayout gridAdj;
     private int neighborDelta = 0;
+    private int neighborDelta2 = 0;
+
+    /** 登录完成后的刷新。 */
+    private final android.content.BroadcastReceiver dataReadyReceiver =
+            new android.content.BroadcastReceiver() {
+                @Override
+                public void onReceive(android.content.Context c, android.content.Intent i) {
+                    android.util.Log.i("Daka", "HOURS data ready -> render now");
+                    if (monthTitle == null) return;
+                    monthTitle.post(new Runnable() {
+                        @Override
+                        public void run() {
+                            render();
+                        }
+                    });
+                }
+            };
     private java.util.List<String[]> dailyRows = new java.util.ArrayList<String[]>();
     private final android.os.Handler watchHandler =
             new android.os.Handler(android.os.Looper.getMainLooper());
@@ -422,6 +439,15 @@ public class HoursPage extends BasePage {
                 startWatcher();
             }
         });
+
+        // 登录完成后立即刷新，不需要切页面
+        try {
+            android.content.IntentFilter f =
+                    new android.content.IntentFilter(KaoqinLoginActivity.ACTION_DATA_READY);
+            host.registerReceiver(dataReadyReceiver, f,
+                    android.content.Context.RECEIVER_NOT_EXPORTED);
+        } catch (Throwable ignored) {
+        }
         return result;
     }
 

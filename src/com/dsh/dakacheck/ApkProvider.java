@@ -41,6 +41,46 @@ public class ApkProvider extends ContentProvider {
         }
     }
 
+    /** 清理所有更新包（内部 cache + Download 目录），返回删了多少个。 */
+    public static int purgeAll(android.content.Context c) {
+        int n = 0;
+        try {
+            // 内部 cache
+            java.io.File cacheDir = c.getCacheDir();
+            if (cacheDir != null && cacheDir.listFiles() != null) {
+                for (java.io.File f : cacheDir.listFiles()) {
+                    if (f.isFile() && f.getName().toLowerCase().endsWith(".apk")) {
+                        if (f.delete()) n++;
+                    }
+                }
+            }
+            // 外部 cache（旧版本下载位置）
+            java.io.File ext = c.getExternalCacheDir();
+            if (ext != null && ext.listFiles() != null) {
+                for (java.io.File f : ext.listFiles()) {
+                    if (f.isFile() && f.getName().toLowerCase().endsWith(".apk")) {
+                        if (f.delete()) n++;
+                    }
+                }
+            }
+            // 公共 Download
+            java.io.File dl = android.os.Environment.getExternalStoragePublicDirectory(
+                    android.os.Environment.DIRECTORY_DOWNLOADS);
+            if (dl != null && dl.listFiles() != null) {
+                for (java.io.File f : dl.listFiles()) {
+                    String nm = f.getName();
+                    if (f.isFile() && nm.toLowerCase().endsWith(".apk")
+                            && nm.contains("打卡提醒")) {
+                        if (f.delete()) n++;
+                    }
+                }
+            }
+            c.getSharedPreferences(PREF, 0).edit().remove(KEY_PENDING).apply();
+        } catch (Throwable ignored) {
+        }
+        return n;
+    }
+
     public static Uri uriFor(File f) {
         return Uri.parse("content://" + AUTHORITY + "/" + f.getName());
     }

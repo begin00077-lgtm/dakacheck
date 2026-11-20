@@ -21,6 +21,8 @@ public class KaoqinLoginActivity extends Activity {
     private boolean countdownShown = false;
     private boolean jumpedToAttendance = false;
     private boolean handled = false;
+    /** 考勤数据已写入完成。 */
+    public static final String ACTION_DATA_READY = "com.dsh.dakacheck.DATA_READY";
     private int retry = 0;
 
     /** 依次尝试的入口文字，命中即点。 */
@@ -381,8 +383,10 @@ public class KaoqinLoginActivity extends Activity {
             @Override
             public void onReceiveValue(String colors) {
                 Warden.handleColorAndText(KaoqinLoginActivity.this, colors, txt);
-                showMask("\u767b\u5f55\u6210\u529f");
-                finishAfter(900);
+                sendBroadcast(new android.content.Intent(ACTION_DATA_READY)
+                        .setPackage(getPackageName()));
+                showMask("登录成功");
+                finishAfter(700);
             }
         });
     }
