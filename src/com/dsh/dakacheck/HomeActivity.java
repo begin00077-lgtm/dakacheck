@@ -24,6 +24,12 @@ public class HomeActivity extends Activity implements PagerHost.Bridge {
         Scheduler.ensure(this);
         
 
+        // 先尝试从「打卡记录/打卡汇总.csv」恢复（卸载重装后不丢数据）
+        final int restored = Archive.restore(this);
+        if (restored > 0) {
+            android.util.Log.i("Daka", "HomeActivity restored " + restored + " days");
+        }
+
         pager = new PagerHost(this, this);
         setContentView(pager);
         pager.buildAll();

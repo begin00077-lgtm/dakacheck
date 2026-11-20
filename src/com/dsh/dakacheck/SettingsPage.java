@@ -149,8 +149,8 @@ public class SettingsPage extends BasePage {
                     }
                 }));
 
-        root.addView(row("立即同步到「打卡记录」", canWrite,
-                canWrite ? "写一次文件" : "需先授权", new Runnable() {
+        root.addView(row("自动导出打卡记录", canWrite,
+                canWrite ? "实时写入「打卡记录」文件夹" : "需先授权", new Runnable() {
                     public void run() {
                         if (!Archive.canWrite()) {
                             Toast.makeText(ctx, "请先授权文件访问",
@@ -161,6 +161,32 @@ public class SettingsPage extends BasePage {
                         Toast.makeText(ctx,
                                 "已写入 " + Archive.dir().getAbsolutePath(),
                                 Toast.LENGTH_LONG).show();
+                    }
+                }));
+
+        root.addView(row("自动导入打卡记录", canWrite,
+                canWrite ? "从「打卡记录」补回缺失记录" : "需先授权", new Runnable() {
+                    public void run() {
+                        if (!Archive.canWrite()) {
+                            Toast.makeText(ctx, "请先授权文件访问",
+                                    Toast.LENGTH_SHORT).show();
+                            return;
+                        }
+                        final int n = Archive.restore(ctx);
+                        Archive.syncAsync(ctx);
+                        android.app.AlertDialog.Builder b =
+                                new android.app.AlertDialog.Builder(host)
+                                        .setTitle("导入完成")
+                                        .setMessage(n > 0
+                                                ? "已从「打卡记录/打卡汇总.csv」导入 "
+                                                    + n + " 条记录。"
+                                                : "没有需要导入的记录（已是最新）。")
+                                        .setPositiveButton("好", null);
+                        b.show();
+                        if (n > 0) {
+                            // 让日历重新渲染
+                            android.util.Log.i("Daka", "restored " + n);
+                        }
                     }
                 }));
 

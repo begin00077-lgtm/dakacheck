@@ -86,7 +86,7 @@ public class KaoqinLoginActivity extends Activity {
                 super.onPageStarted(v, url, favicon);
                 Log.i("Daka", "KQL start " + url);
                 if (url == null) return;
-                if (url.contains("/login")) {
+                if (isLoginPage(url)) {
                     // \u5230\u4e86\u767b\u5f55\u9875\uff1a\u5f7b\u5e95\u64a4\u6389\u906e\u7f69\uff0c\u8ba9\u7528\u6237\u80fd\u8f93\u5165
                     sawLoginPage = true;
                     hideMask();
@@ -106,7 +106,7 @@ public class KaoqinLoginActivity extends Activity {
                 Log.i("Daka", "KQL finish " + url);
                 if (url == null) return;
                 installOpenHook(v);
-                if (url.contains("/login")) {
+                if (isLoginPage(url)) {
                     // \u767b\u5f55\u9875\uff1a\u4e0d\u76d6\u906e\u7f69
                     sawLoginPage = true;
                     hideMask();
@@ -784,5 +784,24 @@ public class KaoqinLoginActivity extends Activity {
         } catch (Throwable ignored) {
         }
         super.onDestroy();
+    }
+
+    /**
+     * 是否是登录/认证相关页面。
+     *
+     * IPSA 的登录页 URL 并不含 "/login"，
+     * 而是走 passport 域名或 corplink/agw 等路径，
+     * 这里统一判定，避免首次登录被遮罩盖住。
+     */
+    private static boolean isLoginPage(String url) {
+        if (url == null) return false;
+        String u = url.toLowerCase();
+        return u.contains("/login")
+                || u.contains("passport.")          // 统一认证域名
+                || u.contains("corplink")
+                || u.contains("/agw/callback")
+                || u.contains("sso")
+                || u.contains("oauth")
+                || u.contains("signin");
     }
 }
