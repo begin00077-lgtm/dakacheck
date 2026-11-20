@@ -172,11 +172,18 @@ public class KaoqinLoginActivity extends Activity {
                         Log.i("Daka", "KQL text len=" + txt.length());
 
                         // 已经离开登录页（出现账号/密码框以外的东西）→ 立刻盖遮罩
-                        boolean stillLogin = txt.contains("\u8bf7\u8f93\u5165\u8d26\u53f7")
+                        boolean onLoginUrl = false;
+                        try {
+                            onLoginUrl = isLoginPage(v.getUrl());
+                        } catch (Throwable ignored) {
+                        }
+                        boolean stillLogin = onLoginUrl
+                                || txt.contains("\u8bf7\u8f93\u5165\u8d26\u53f7")
                                 || txt.contains("\u8bf7\u8f93\u5165\u5bc6\u7801")
                                 || txt.contains("\u66f4\u591a\u767b\u5f55\u65b9\u5f0f")
                                 || txt.contains("\u94ae\u9489\u5feb\u6377\u767b\u5f55")
-                                || txt.contains("\u4e00\u952e\u767b\u5f55");
+                                || txt.contains("\u4e00\u952e\u767b\u5f55")
+                                || txt.contains("\u8f6f\u901a\u536b\u58eb");
                         if (stillLogin) {
                             sawLoginPage = true;
                             hideMask();

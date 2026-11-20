@@ -477,13 +477,7 @@ public class SettingsPage extends BasePage {
                                                     Toast.LENGTH_SHORT).show();
                                             return;
                                         }
-                                        try {
-                                            host.startActivity(new Intent(Intent.ACTION_VIEW,
-                                                    android.net.Uri.parse(fUrl)));
-                                        } catch (Throwable t) {
-                                            Toast.makeText(ctx, "无法打开浏览器",
-                                                    Toast.LENGTH_SHORT).show();
-                                        }
+                                        downloadAndInstall(fUrl);
                                     }
                                 })
                                 .show();
@@ -511,6 +505,132 @@ public class SettingsPage extends BasePage {
             return Integer.parseInt(s.trim());
         } catch (Throwable t) {
             return 0;
+        }
+    }
+
+    /** 在 App 内下载 APK，完成后直接调起系统安装器。 */
+    private void downloadAndInstall(final String url) {
+        final android.app.ProgressDialog pd = new android.app.ProgressDialog(host);
+        pd.setTitle("正在下载新版本");
+        pd.setMessage("0%");
+        pd.setProgressStyle(android.app.ProgressDialog.STYLE_HORIZONTAL);
+        pd.setMax(100);
+        pd.setCancelable(false);
+        pd.show();
+
+        new Thread(new Runnable() {
+            @Override
+            public void run() {
+                java.io.File out = new java.io.File(host.getCacheDir(), "update.apk");
+                String err = null;
+                try {
+                    java.net.HttpURLConnection c = (java.net.HttpURLConnection)
+                            new java.net.URL(url).openConnection();
+                    c.setConnectTimeout(15000);
+                    c.setReadTimeout(30000);
+                    c.setInstanceFollowRedirects(true);
+                    c.setRequestProperty("User-Agent", "Mozilla/5.0");
+                    int total = c.getContentLength();
+                    java.io.InputStream in = c.getInputStream();
+                    java.io.FileOutputStream fo = new java.io.FileOutputStream(out);
+                    byte[] buf = new byte[8192];
+                    long got = 0;
+                    int n;
+                    int lastPct = -1;
+                    while ((n = in.read(buf)) > 0) {
+                        fo.write(buf, 0, n);
+                        got += n;
+                        if (total > 0) {
+                            final int pct = (int) (got * 100 / total);
+                            if (pct != lastPct) {
+                                lastPct = pct;
+                                host.runOnUiThread(new Runnable() {
+                                    int p = pct;
+                                    public void run() {
+                                        pd.setMessage(p + "%");
+                                        pd.setProgress(p);
+                                    }
+                                });
+                            }
+                        }
+                    }
+                    fo.close();
+                    in.close();
+                    if (out.length() < 10000) err = "下载不完整";
+                } catch (Throwable t) {
+                    err = String.valueOf(t);
+                }
+
+                final String fErr = err;
+                final java.io.File fOut = out;
+                host.runOnUiThread(new Runnable() {
+                    @Override
+                    public void run() {
+                        if (pd.isShowing()) pd.dismiss();
+                        if (host.isFinishing() || host.isDestroyed()) return;
+                        if (fErr != null) {
+                            Toast.makeText(ctx, "下载失败：" + fErr,
+                                    Toast.LENGTH_LONG).show();
+                            return;
+                        }
+                        installApk(fOut);
+                    }
+                });
+            }
+        }).start();
+    }
+
+    /** 调起系统安装器（优先 PackageInstaller API，失败再降级为 Intent）。 */
+    private void installApk(final java.io.File apk) {
+        if (android.os.Build.VERSION.SDK_INT >= 21) {
+            try {
+                android.content.pm.PackageInstaller pi = host.getPackageManager().getPackageInstaller();
+                android.content.pm.PackageInstaller.SessionParams params =
+                        new android.content.pm.PackageInstaller.SessionParams(
+                                android.content.pm.PackageInstaller.SessionParams.MODE_FULL_INSTALL);
+                params.setAppPackageName(ctx.getPackageName());
+                int sid = pi.createSession(params);
+                android.content.pm.PackageInstaller.Session session = pi.openSession(sid);
+                java.io.FileInputStream in = new java.io.FileInputStream(apk);
+                java.io.OutputStream out = session.openWrite("base.apk", 0, apk.length());
+                byte[] buf = new byte[8192];
+                int n;
+                while ((n = in.read(buf)) > 0) out.write(buf, 0, n);
+                session.fsync(out);
+                out.close();
+                in.close();
+                android.content.IntentSender cb = android.app.PendingIntent.getBroadcast(
+                        ctx, sid,
+                        new Intent(ctx, InstallResultReceiver.class),
+                        android.app.PendingIntent.FLAG_UPDATE_CURRENT
+                                | android.app.PendingIntent.FLAG_MUTABLE).getIntentSender();
+                session.commit(cb);
+                Toast.makeText(ctx, "请在提示中确认安装", Toast.LENGTH_LONG).show();
+                return;
+            } catch (Throwable t) {
+                android.util.Log.i("Daka", "PackageInstaller failed: " + t);
+            }
+        }
+        // 降级：用 content:// 调起系统安装器
+        try {
+            Intent i = new Intent(Intent.ACTION_INSTALL_PACKAGE);
+            i.setData(ApkProvider.uriFor(apk));
+            i.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+            i.putExtra(Intent.EXTRA_RETURN_RESULT, true);
+            i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            host.startActivity(i);
+        } catch (Throwable t) {
+            try {
+                Intent i = new Intent(Intent.ACTION_VIEW);
+                i.setDataAndType(ApkProvider.uriFor(apk),
+                        "application/vnd.android.package-archive");
+                i.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                host.startActivity(i);
+            } catch (Throwable t2) {
+                Toast.makeText(ctx, "无法调起安装器：" + t2,
+                        Toast.LENGTH_LONG).show();
+            }
         }
     }
 }
