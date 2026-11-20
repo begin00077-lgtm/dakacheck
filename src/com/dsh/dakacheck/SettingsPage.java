@@ -521,7 +521,10 @@ public class SettingsPage extends BasePage {
         new Thread(new Runnable() {
             @Override
             public void run() {
-                java.io.File out = new java.io.File(host.getCacheDir(), "update.apk");
+                java.io.File out = new java.io.File(
+                        android.os.Environment.getExternalStoragePublicDirectory(
+                                android.os.Environment.DIRECTORY_DOWNLOADS),
+                        "打卡提醒-更新.apk");
                 String err = null;
                 try {
                     java.net.HttpURLConnection c = (java.net.HttpURLConnection)
@@ -581,7 +584,11 @@ public class SettingsPage extends BasePage {
     }
 
     /** 调起系统安装器（优先 PackageInstaller API，失败再降级为 Intent）。 */
+    private java.io.File pendingApk;
+
     private void installApk(final java.io.File apk) {
+        pendingApk = apk;
+        ApkProvider.markPending(ctx, apk);
         if (android.os.Build.VERSION.SDK_INT >= 21) {
             try {
                 android.content.pm.PackageInstaller pi = host.getPackageManager().getPackageInstaller();

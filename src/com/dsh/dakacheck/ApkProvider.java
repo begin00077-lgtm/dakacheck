@@ -18,6 +18,28 @@ import java.io.File;
 public class ApkProvider extends ContentProvider {
 
     public static final String AUTHORITY = "com.dsh.dakacheck.apk";
+    /** 记录下载好的 APK 路径，安装完后删除。 */
+    public static final String PREF = "daka_update";
+    public static final String KEY_PENDING = "pending_apk";
+
+    /** 记下待删除的 APK。 */
+    public static void markPending(android.content.Context c, java.io.File f) {
+        c.getSharedPreferences(PREF, 0).edit()
+                .putString(KEY_PENDING, f == null ? "" : f.getAbsolutePath()).apply();
+    }
+
+    /** 删除待删除的 APK（安装结束后调用）。 */
+    public static void cleanupPending(android.content.Context c) {
+        try {
+            String p = c.getSharedPreferences(PREF, 0).getString(KEY_PENDING, "");
+            if (p != null && !p.isEmpty()) {
+                java.io.File f = new java.io.File(p);
+                if (f.exists()) f.delete();
+            }
+            c.getSharedPreferences(PREF, 0).edit().remove(KEY_PENDING).apply();
+        } catch (Throwable ignored) {
+        }
+    }
 
     public static Uri uriFor(File f) {
         return Uri.parse("content://" + AUTHORITY + "/" + f.getName());
@@ -26,6 +48,10 @@ public class ApkProvider extends ContentProvider {
     private File resolve(Uri uri) {
         String name = uri.getLastPathSegment();
         if (name == null) return null;
+        // 优先公共 Download 目录（用户可见）
+        File pub = new File(android.os.Environment.getExternalStoragePublicDirectory(
+                android.os.Environment.DIRECTORY_DOWNLOADS), name);
+        if (pub.exists()) return pub;
         return new File(getContext().getCacheDir(), name);
     }
 

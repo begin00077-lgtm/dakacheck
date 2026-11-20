@@ -12,6 +12,10 @@ public class InstallResultReceiver extends BroadcastReceiver {
     public void onReceive(Context c, Intent i) {
         int status = i.getIntExtra("android.content.pm.extra.STATUS", -999);
         Log.i("Daka", "install result status=" + status);
+        // 安装结束（成功或取消）后删掉下载包
+        if (status != android.content.pm.PackageInstaller.STATUS_PENDING_USER_ACTION) {
+            com.dsh.dakacheck.ApkProvider.cleanupPending(c);
+        }
         if (status == android.content.pm.PackageInstaller.STATUS_PENDING_USER_ACTION) {
             Intent confirm = (Intent) i.getParcelableExtra(Intent.EXTRA_INTENT);
             if (confirm != null) {
