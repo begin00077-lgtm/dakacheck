@@ -44,12 +44,33 @@ public final class Scheduler {
             t.add(Calendar.DAY_OF_MONTH, 1);
         }
         // 非工作日不核对打卡：直接跳到下一个工作日，周末/节假日根本不排闹钟
+        //
+        // 注意：核对的目标日可能不是触发日。
+        // 签退在凌晨（<4 点）核对，目标是前一天；
+        // 所以要同时满足：触发日是工作日、目标日也是工作日。
+        // 否则会出现「周日 02:30 去核对周日」这种无效提醒。
         int skipped = 0;
         for (int i = 0; i < 40; i++) {
-            String date = String.format(java.util.Locale.CHINA, "%04d-%02d-%02d",
-                    t.get(Calendar.YEAR), t.get(Calendar.MONTH) + 1,
-                    t.get(Calendar.DAY_OF_MONTH));
-            if (CheckReceiver.isWorkday(c, date)) break;
+            int y = t.get(Calendar.YEAR);
+            int mo = t.get(Calendar.MONTH) + 1;
+            int d = t.get(Calendar.DAY_OF_MONTH);
+            String fireDate = String.format(java.util.Locale.CHINA, "%04d-%02d-%02d", y, mo, d);
+
+            // 触发日必须是工作日
+            boolean okFire = CheckReceiver.isWorkday(c, fireDate);
+
+            // 目标日：触发时刻小于 4 点就是前一天
+            int targetH = hour(c, kind);
+            java.util.Calendar tc = (java.util.Calendar) t.clone();
+            if (targetH < 4) {
+                tc.add(Calendar.DAY_OF_MONTH, -1);
+            }
+            String targetDate = String.format(java.util.Locale.CHINA, "%04d-%02d-%02d",
+                    tc.get(Calendar.YEAR), tc.get(Calendar.MONTH) + 1,
+                    tc.get(Calendar.DAY_OF_MONTH));
+            boolean okTarget = CheckReceiver.isWorkday(c, targetDate);
+
+            if (okFire && okTarget) break;
             skipped++;
             t.add(Calendar.DAY_OF_MONTH, 1);
         }

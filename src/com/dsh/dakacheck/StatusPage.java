@@ -2,6 +2,7 @@ package com.dsh.dakacheck;
 
 import android.app.AlertDialog;
 import android.content.Context;
+import android.content.DialogInterface;
 import android.content.Intent;
 import android.graphics.Color;
 import android.graphics.Typeface;
@@ -233,21 +234,6 @@ public class StatusPage extends BasePage {
         LinearLayout col = new LinearLayout(ctx);
         col.setOrientation(LinearLayout.VERTICAL);
 
-        final View reviveCell = cell("自动拉起", Guard.canRevive(ctx), "已授权", "未授权");
-        reviveCell.setOnClickListener(new View.OnClickListener() {
-            @Override
-            public void onClick(View v) {
-                new AlertDialog.Builder(ctx)
-                        .setTitle("自动拉起权限")
-                        .setMessage("这个权限 Android 只允许用 adb 授予，App 内无法申请。\n\n"
-                                + "电脑连上手机执行一次：\n\n"
-                                + "adb shell pm grant com.dsh.dakacheck android.permission.WRITE_SECURE_SETTINGS\n\n"
-                                + "没有它也能正常用，只是无障碍被关掉时，插件只能弹通知提醒你手动开，不能自己写回来。")
-                        .setPositiveButton("知道了", null)
-                        .show();
-            }
-        });
-
         LinearLayout row1 = new LinearLayout(ctx);
         row1.setOrientation(LinearLayout.HORIZONTAL);
         // 以系统设置为准：设置里开着就是开着。
@@ -256,7 +242,34 @@ public class StatusPage extends BasePage {
         boolean a11yOnline = a11yEnabled && AttendanceService.connected;
         row1.addView(cell("无障碍", a11yEnabled,
                 a11yOnline ? "在线" : "已开启", "已关闭"), halfLp());
-        row1.addView(reviveCell, halfLp());
+
+        // 后台常驻：耗电优化（电池）是否设为「完全允许后台行为」。
+        boolean bgOk = batteryUnrestricted();
+        View bgCell = cell("后台常驻", bgOk,
+                "已开放", "受限");
+        bgCell.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                new AlertDialog.Builder(ctx)
+                        .setTitle("后台常驻")
+                        .setMessage("请到「设置 → 电池 → 应用耗电管理」，"
+                                + "把「打卡提醒」设为「完全允许后台行为」，"
+                                + "否则后台可能被杀、提醒不响。")
+                        .setNegativeButton("取消", null)
+                        .setPositiveButton("去设置", new DialogInterface.OnClickListener() {
+                            public void onClick(DialogInterface d, int w) {
+                                try {
+                                    host.startActivity(new Intent(
+                                            android.provider.Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS));
+                                } catch (Throwable t) {
+                                    Toast.makeText(ctx, "无法打开设置", Toast.LENGTH_SHORT).show();
+                                }
+                            }
+                        })
+                        .show();
+            }
+        });
+        row1.addView(bgCell, halfLp());
         col.addView(row1);
 
         LinearLayout row2 = new LinearLayout(ctx);
@@ -265,6 +278,17 @@ public class StatusPage extends BasePage {
         row2.addView(cell("通知", notificationsOn(), "已允许", "未允许"), halfLp());
         col.addView(row2);
         return col;
+    }
+
+    /** 是否不受电池优化限制（完全允许后台行为）。 */
+    protected boolean batteryUnrestricted() {
+        try {
+            android.os.PowerManager pm = (android.os.PowerManager)
+                    ctx.getSystemService(android.content.Context.POWER_SERVICE);
+            return pm != null && pm.isIgnoringBatteryOptimizations(ctx.getPackageName());
+        } catch (Throwable t) {
+            return false;
+        }
     }
 
     protected LinearLayout.LayoutParams halfLp() {

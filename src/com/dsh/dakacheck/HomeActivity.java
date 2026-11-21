@@ -48,6 +48,9 @@ public class HomeActivity extends Activity implements PagerHost.Bridge {
         if (remindPage != null) {
             remindPage.onShown();
         }
+        if (settingsPage != null) {
+            settingsPage.onShown();
+        }
     }
 
     @Override
@@ -85,6 +88,9 @@ public class HomeActivity extends Activity implements PagerHost.Bridge {
     public void onPageShown(int tab) {
         if (tab == PagerHost.TAB_REMIND && remindPage != null) {
             remindPage.onShown();
+        }
+        if (tab == PagerHost.TAB_SETTINGS && settingsPage != null) {
+            settingsPage.onShown();
         }
         if (statusPage != null) {
             statusPage.refresh();

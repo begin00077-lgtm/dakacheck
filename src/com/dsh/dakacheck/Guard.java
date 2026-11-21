@@ -81,9 +81,19 @@ public final class Guard {
             Scheduler.ensureWarden(c);
         }
         if (!accessibilityEnabled(c)) {
-            if (!reviveAccessibility(c)) {
-                Timeline.add(c, "开关未开，且重开失败");
-                Notify.info(c, "打卡监控掉线了", "无障碍服务被关闭，插件读不到打卡状态，点开重新开启。");
+            // 有 WRITE_SECURE_SETTINGS（只能 adb / Shizuku 授予）就自己写回系统设置把服务拉起来
+            if (canRevive(c) && reviveAccessibility(c)) {
+                Timeline.add(c, "无障碍已自动重开");
+                Log.i("Daka", "a11y auto revived");
+                return;
+            }
+            // 没权限或拉起失败：提醒用户手动开
+            long now = System.currentTimeMillis();
+            if (now - lastA11yNotify > 6 * 3600_000L) {
+                lastA11yNotify = now;
+                Timeline.add(c, "无障碍未开启");
+                Notify.info(c, "打卡监控需要无障碍",
+                        "请到系统设置里重新开启「打卡提醒」的无障碍服务。");
             }
             return;
         }
@@ -98,4 +108,5 @@ public final class Guard {
     }
 
     private static long lastRebind = 0L;
+    private static long lastA11yNotify = 0L;
 }

@@ -31,9 +31,40 @@ public class SettingsPage extends BasePage {
         super(host);
     }
 
+    private boolean pendingPermRefresh = false;
+    private View rootView;
+    private ViewGroup container;
+
     @Override
     public View build() {
-        return buildInner();
+        rootView = buildInner();
+        return rootView;
+    }
+
+    /** 页面被切到时重建，保证权限状态是最新的。 */
+    @Override
+    public void onShown() {
+        rebuild();
+        if (pendingPermRefresh) {
+            pendingPermRefresh = false;
+            // 从系统授权页返回：重开「所有授权项」，开关已按真实状态重建
+            showAllPerms();
+        }
+    }
+
+    /** 把新内容换进父容器。 */
+    private void rebuild() {
+        try {
+            if (rootView == null || rootView.getParent() == null) return;
+            ViewGroup parent = (ViewGroup) rootView.getParent();
+            int idx = parent.indexOfChild(rootView);
+            parent.removeView(rootView);
+            View fresh = buildInner();
+            parent.addView(fresh, idx);
+            rootView = fresh;
+        } catch (Throwable t) {
+            android.util.Log.i("Daka", "settings rebuild failed: " + t);
+        }
     }
 
     /** 弹出作者微信二维码。 */
@@ -76,52 +107,25 @@ public class SettingsPage extends BasePage {
 
         root.addView(section("权限"));
 
-        root.addView(row("无障碍服务", accessibilityOn(),
-                "去开启 / 关闭", new Runnable() {
+        root.addView(row("一键授权", null,
+                "依次弹出全部权限设置", new Runnable() {
                     public void run() {
-                        host.startActivity(new Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS));
+                        runPermissionWizard(0);
                     }
                 }));
 
-        root.addView(row("电池优化（允许后台运行）", batteryAllowed(),
-                "设为不限制", new Runnable() {
+        root.addView(row("所有授权项", null,
+                "查看并单独授权每一项", new Runnable() {
                     public void run() {
-                        try {
-                            Intent i = new Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS);
-                            i.setData(Uri.parse("package:" + ctx.getPackageName()));
-                            host.startActivity(i);
-                        } catch (Exception e) {
-                            try {
-                                host.startActivity(new Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS));
-                            } catch (Exception ignored) {
-                            }
-                        }
+                        showAllPerms();
                     }
                 }));
 
-        root.addView(row("全屏提醒权限", fullScreenIntent(),
-                "允许锁屏弹出", new Runnable() {
-                    public void run() {
-                        try {
-                            Intent i = new Intent(Settings.ACTION_MANAGE_APP_USE_FULL_SCREEN_INTENT);
-                            i.setData(Uri.parse("package:" + ctx.getPackageName()));
-                            host.startActivity(i);
-                        } catch (Exception e) {
-                            Toast.makeText(ctx, "系统没有这个设置页，一般默认允许", Toast.LENGTH_SHORT).show();
-                        }
-                    }
-                }));
 
-        root.addView(row("使用情况访问（防误响）", Usage.hasPermission(ctx),
-                "允许读取应用使用记录", new Runnable() {
-                    public void run() {
-                        try {
-                            host.startActivity(new Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS));
-                        } catch (Exception e) {
-                            Toast.makeText(ctx, "系统没有这个设置页", Toast.LENGTH_SHORT).show();
-                        }
-                    }
-                }));
+
+
+
+
 
         root.addView(section("备份"));
 
@@ -652,6 +656,279 @@ public class SettingsPage extends BasePage {
                 Toast.makeText(ctx, "无法调起安装器：" + t2,
                         Toast.LENGTH_LONG).show();
             }
+        }
+    }
+
+    /** 全部需要开的权限，顺序弹出。 */
+    private final String[] PERM_NAMES = {
+            "无障碍服务",
+            "通知",
+            "精确闹钟",
+            "电池优化",
+            "全屏提醒",
+            "使用情况访问",
+            "文件访问",
+            "安装未知应用"
+    };
+
+    private final String[] PERM_TIPS = {
+            "在列表里找到「打卡提醒」，打开开关。\n\n这是最重要的一项，没它读不到打卡状态。",
+            "允许发送通知，否则提醒时看不到提示。",
+            "允许设置精确闹钟，否则提醒可能延迟。",
+            "选择「不限制」，防止后台被杀。",
+            "允许锁屏时弹出报警。",
+            "找到「打卡提醒」，打开。",
+            "允许访问所有文件，用来自动导出/导入打卡记录。",
+            "允许安装应用，App 内自动更新需要。"
+    };
+
+        /** 一键授权：只弹出「还没开」的项，已开的直接跳过。 */
+    private void runPermissionWizard(final int idx) {
+        if (idx >= PERM_NAMES.length) {
+            Toast.makeText(ctx, "需要的权限都开好了", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        // 已经开启的项不再弹窗
+        if (checkPerm(idx)) {
+            runPermissionWizard(idx + 1);
+            return;
+        }
+        // 统计剩下还有几项没开
+        int remain = 0;
+        for (int k = idx; k < PERM_NAMES.length; k++) {
+            if (!checkPerm(k)) remain++;
+        }
+        String title = "还需开启 " + remain + " 项：" + PERM_NAMES[idx];
+
+        new android.app.AlertDialog.Builder(host)
+                .setTitle(title)
+                .setMessage(PERM_TIPS[idx])
+                .setNegativeButton("取消", new android.content.DialogInterface.OnClickListener() {
+                    public void onClick(android.content.DialogInterface d, int w) {
+                        // 取消 = 中止引导
+                    }
+                })
+                .setPositiveButton("去开启",
+                        new android.content.DialogInterface.OnClickListener() {
+                            public void onClick(android.content.DialogInterface d, int w) {
+                                openPermSettings(idx);
+                            }
+                        })
+                .setCancelable(false)
+                .show();
+    }
+
+    /** 所有授权项二级页面：展示全部，可单独点击授权。 */
+    /** 所有授权项：每项带滑块开关，点开关去授权。 */
+    /** 所有授权项：滑块开关实时反映系统真实状态。 */
+    private void showAllPerms() {
+        // 每个项目的开关引用，供定时刷新
+        final java.util.List<android.widget.Switch> switches = new java.util.ArrayList<>();
+        final com.dsh.dakacheck.SettingsPage self = this;
+
+        LinearLayout box = new LinearLayout(ctx);
+        box.setOrientation(LinearLayout.VERTICAL);
+        int pd = (int) dp(12);
+        box.setPadding(pd, pd, pd, 0);
+
+        for (int i = 0; i < PERM_NAMES.length; i++) {
+            final int idx = i;
+            boolean ok = checkPerm(i);
+
+            LinearLayout item = new LinearLayout(ctx);
+            item.setOrientation(LinearLayout.HORIZONTAL);
+            item.setGravity(Gravity.CENTER_VERTICAL);
+            item.setPadding((int) dp(10), (int) dp(8), (int) dp(6), (int) dp(8));
+            GradientDrawable bg = new GradientDrawable();
+            bg.setCornerRadius(dp(10));
+            bg.setColor(Color.WHITE);
+            item.setBackground(bg);
+            LinearLayout.LayoutParams ilp = new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    ViewGroup.LayoutParams.WRAP_CONTENT);
+            ilp.bottomMargin = (int) dp(6);
+
+            TextView name = new TextView(ctx);
+            name.setText(PERM_NAMES[i]);
+            name.setTextSize(15f);
+            name.setTextColor(Color.parseColor("#111111"));
+            item.addView(name, new LinearLayout.LayoutParams(
+                    0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+
+            // 开关只展示真实状态，不接收手动切换
+            final android.widget.Switch sw = new android.widget.Switch(ctx);
+            sw.setChecked(ok);
+            sw.setClickable(false);
+            sw.setFocusable(false);
+            sw.setTag(Integer.valueOf(idx));
+            switches.add(sw);
+
+            item.setOnClickListener(new View.OnClickListener() {
+                public void onClick(View v) {
+                    openPermSettings(idx);
+                }
+            });
+            item.addView(sw, new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.WRAP_CONTENT,
+                    ViewGroup.LayoutParams.WRAP_CONTENT));
+
+            box.addView(item, ilp);
+        }
+
+        TextView tip = new TextView(ctx);
+        tip.setText("点一行去系统授权，回来自动刷新。");
+        tip.setTextSize(12f);
+        tip.setTextColor(Color.parseColor("#888888"));
+        tip.setPadding((int) dp(4), (int) dp(6), (int) dp(4), (int) dp(4));
+        box.addView(tip);
+
+        ScrollView sv = new ScrollView(ctx);
+        sv.addView(box);
+
+        final android.app.AlertDialog dlg = new android.app.AlertDialog.Builder(host)
+                .setTitle("所有授权项")
+                .setView(sv)
+                .setPositiveButton("关闭", null)
+                .create();
+
+        // 定时刷新开关（回到本页、授权状态变化时都能立即反映）
+        final android.os.Handler h = new android.os.Handler(android.os.Looper.getMainLooper());
+        final Runnable ticker = new Runnable() {
+            @Override
+            public void run() {
+                try {
+                    for (android.widget.Switch sw : switches) {
+                        int idx = ((Integer) sw.getTag()).intValue();
+                        boolean real = self.checkPerm(idx);
+                        if (sw.isChecked() != real) {
+                            sw.setChecked(real);
+                        }
+                    }
+                } catch (Throwable ignored) {
+                }
+                if (dlg.isShowing()) {
+                    h.postDelayed(this, 800);
+                }
+            }
+        };
+
+        dlg.setOnDismissListener(new android.content.DialogInterface.OnDismissListener() {
+            @Override
+            public void onDismiss(android.content.DialogInterface d) {
+                h.removeCallbacks(ticker);
+            }
+        });
+        dlg.show();
+        h.postDelayed(ticker, 500);
+    }
+
+    private boolean checkPerm(int idx) {
+        switch (idx) {
+            case 0: return accessibilityOn();
+            case 1: return notificationsOn();
+            case 2: return Scheduler.canExact(ctx);
+            case 3: return batteryAllowed();
+            case 4: return fullScreenIntent();
+            case 5: return Usage.hasPermission(ctx);
+            case 6: return Archive.canWrite();
+            case 7: return canInstallPackages();
+            default: return true;
+        }
+    }
+
+    /** 是否已允许发通知。 */
+    private boolean notificationsOn() {
+        try {
+            if (Build.VERSION.SDK_INT >= 33) {
+                return host.checkSelfPermission("android.permission.POST_NOTIFICATIONS")
+                        == android.content.pm.PackageManager.PERMISSION_GRANTED;
+            }
+            return NotificationManagerCompatFromContext();
+        } catch (Throwable t) {
+            return false;
+        }
+    }
+
+    /** Android 13 之前的通知开关判定。 */
+    private boolean NotificationManagerCompatFromContext() {
+        try {
+            NotificationManager nm = (NotificationManager)
+                    ctx.getSystemService(Context.NOTIFICATION_SERVICE);
+            return nm != null && nm.areNotificationsEnabled();
+        } catch (Throwable t) {
+            return true;
+        }
+    }
+
+    /** 是否允许安装未知应用。 */
+    private boolean canInstallPackages() {
+        try {
+            if (android.os.Build.VERSION.SDK_INT < 26) return true;
+            return host.getPackageManager().canRequestPackageInstalls();
+        } catch (Throwable t) {
+            return false;
+        }
+    }
+
+    private void openPermSettings(int idx) {
+        try {
+            switch (idx) {
+                case 0:
+                    host.startActivity(new Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS));
+                    break;
+                case 1: {
+                    // 通知权限（Android 13+ 需要动态授权）
+                    if (android.os.Build.VERSION.SDK_INT >= 33) {
+                        host.requestPermissions(
+                                new String[]{"android.permission.POST_NOTIFICATIONS"}, 1001);
+                        Toast.makeText(ctx, "在弹窗里选「允许」后，再回到本页",
+                                Toast.LENGTH_LONG).show();
+                    } else {
+                        Intent i = new Intent(
+                                android.provider.Settings.ACTION_APP_NOTIFICATION_SETTINGS);
+                        i.putExtra(android.provider.Settings.EXTRA_APP_PACKAGE,
+                                ctx.getPackageName());
+                        host.startActivity(i);
+                    }
+                    break;
+                }
+                case 2: {
+                    Intent i = new Intent(
+                            android.provider.Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM);
+                    i.setData(Uri.parse("package:" + ctx.getPackageName()));
+                    host.startActivity(i);
+                    break;
+                }
+                case 3: {
+                    Intent i = new Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS);
+                    i.setData(Uri.parse("package:" + ctx.getPackageName()));
+                    host.startActivity(i);
+                    break;
+                }
+                case 4: {
+                    Intent i = new Intent(Settings.ACTION_MANAGE_APP_USE_FULL_SCREEN_INTENT);
+                    i.setData(Uri.parse("package:" + ctx.getPackageName()));
+                    host.startActivity(i);
+                    break;
+                }
+                case 5:
+                    host.startActivity(new Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS));
+                    break;
+                case 6: {
+                    Intent i = new Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION);
+                    i.setData(Uri.parse("package:" + ctx.getPackageName()));
+                    host.startActivity(i);
+                    break;
+                }
+                case 7: {
+                    Intent i = new Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES);
+                    i.setData(Uri.parse("package:" + ctx.getPackageName()));
+                    host.startActivity(i);
+                    break;
+                }
+            }
+        } catch (Throwable t) {
+            Toast.makeText(ctx, "无法打开设置页：" + t, Toast.LENGTH_SHORT).show();
         }
     }
 }
