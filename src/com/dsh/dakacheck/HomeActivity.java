@@ -22,6 +22,7 @@ public class HomeActivity extends Activity implements PagerHost.Bridge {
         MainActivity.initCtx(getApplicationContext());
         Holidays.refreshAsync(this);
         Scheduler.ensure(this);
+        Guard.ensure(this);
         
 
         // 先尝试从「打卡记录/打卡汇总.csv」恢复（卸载重装后不丢数据）

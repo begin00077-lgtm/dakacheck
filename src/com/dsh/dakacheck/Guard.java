@@ -54,13 +54,50 @@ public final class Guard {
     }
 
     /** 没有无障碍就写回系统设置，把服务拉起来。返回是否成功。 */
+    /**
+     * 把自己追加回无障碍列表，**保留其他已开启的服务**。
+     *
+     * 直接覆写整个列表会把别的 App（例如拦截/自动化工具）的无障碍踢掉，
+     * 对方下次写回时也会把我们踢掉，互相覆盖。所以这里只做「追加」。
+     */
     public static boolean reviveAccessibility(Context c) {
         try {
-            Settings.Secure.putString(c.getContentResolver(),
-                    Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES, SERVICE);
-            Settings.Secure.putString(c.getContentResolver(),
-                    Settings.Secure.ACCESSIBILITY_ENABLED, "1");
-            Log.i("Daka", "revived accessibility setting");
+            String cur = Settings.Secure.getString(c.getContentResolver(),
+                    Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES);
+            if (cur == null) cur = "";
+            cur = cur.trim();
+
+            // 系统会把服务名缩写成 a.b/.Svc，两种写法都要认出来
+            String shortForm = "com.dsh.dakacheck/.AttendanceService";
+            boolean already = false;
+            for (String one : cur.split(":")) {
+                String t = one.trim();
+                if (t.equals(SERVICE) || t.equals(shortForm)
+                        || t.endsWith("/.AttendanceService")) {
+                    already = true;
+                    break;
+                }
+            }
+
+            String merged;
+            if (already) {
+                merged = cur;
+            } else if (cur.isEmpty()) {
+                merged = SERVICE;
+            } else {
+                merged = cur + ":" + SERVICE;
+            }
+
+            if (!merged.equals(cur)) {
+                Settings.Secure.putString(c.getContentResolver(),
+                        Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES, merged);
+            }
+            if (!"1".equals(Settings.Secure.getString(c.getContentResolver(),
+                    Settings.Secure.ACCESSIBILITY_ENABLED))) {
+                Settings.Secure.putString(c.getContentResolver(),
+                        Settings.Secure.ACCESSIBILITY_ENABLED, "1");
+            }
+            Log.i("Daka", "revived accessibility -> " + merged);
             return true;
         } catch (SecurityException e) {
             Log.i("Daka", "revive failed: no WRITE_SECURE_SETTINGS");
