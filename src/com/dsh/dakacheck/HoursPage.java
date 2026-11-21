@@ -813,11 +813,14 @@ public class HoursPage extends BasePage {
 
         GradientDrawable g = new GradientDrawable();
         g.setCornerRadius(0);
+        // 绿色状态：正常、请假/出勤类、出差类都不算异常
         boolean isNormal = issue != null && issue.contains("正常");
-        boolean isBad = issue != null && !issue.isEmpty() && !isNormal;
+        boolean isGreen = isNormal || (issue != null
+                && com.dsh.dakacheck.KaoqinParser.greenTag(issue) != null);
+        boolean isBad = issue != null && !issue.isEmpty() && !isGreen;
         if (isBad) {
             g.setColor(Color.parseColor("#33FFA726"));
-        } else if (isNormal) {
+        } else if (isGreen) {
             g.setColor(Color.parseColor("#E8F5E9"));
         } else if (rest) {
             g.setColor(Color.parseColor("#33FF8FAB"));
