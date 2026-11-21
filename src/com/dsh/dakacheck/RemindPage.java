@@ -61,7 +61,7 @@ public final class RemindPage extends BasePage {
         swTitle.setTextColor(Color.parseColor("#111111"));
 
         TextView swDesc = new TextView(ctx);
-        swDesc.setText("每天按下面的时间核对是否打卡");
+        swDesc.setText("每天按下面的时间核对是否已打卡");
         swDesc.setTextSize(12f);
         swDesc.setTextColor(Color.parseColor("#888888"));
         swDesc.setPadding(0, (int) dp(3), 0, 0);
@@ -80,8 +80,8 @@ public final class RemindPage extends BasePage {
 
         TextView hint = new TextView(ctx);
         hint.setText("• 考勤日按 04:00 划分：0–4 点之间页面显示的是前一天的考勤，其余时间查当天。\n"
-                + "• 签退在次日凌晨核对，方便加班到 0 点后的人补打卡。\n"
-                + "• 周末和法定节假日不核对；调休补班日按工作日处理。\n"
+                + "• 签退在次日凌晨核对，方便加班后补打卡。\n"
+                + "• 周末和节假日不核对，调休补班日算工作日。\n"
                 + "• 异常提醒永久开启，考勤同步每次都会自动执行。");
         hint.setTextSize(13.5f);
         hint.setTextColor(Color.parseColor("#444444"));

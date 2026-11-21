@@ -25,7 +25,7 @@ public final class PagerHost extends LinearLayout {
     public static final int TAB_HOURS = 2;
     public static final int TAB_SETTINGS = 3;
 
-    private static final String[] TITLES = {"签到状态", "提醒设置", "工时日历", "设置"};
+    private static final String[] TITLES = {"签到状态", "打卡提醒", "工时日历", "设置"};
     private static final int COLOR_ON = 0xFF07C160;
     private static final int COLOR_OFF = 0xFF8A8A8A;
 
