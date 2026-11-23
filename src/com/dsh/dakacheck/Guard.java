@@ -142,6 +142,8 @@ public final class Guard {
                 Timeline.add(c, "无障碍未连接（等待系统重连）");
             }
         }
+        // 每次自检顺带检查各项权限是否掉线（用户开了提醒才发）
+        PermAlert.check(c);
     }
 
     private static long lastRebind = 0L;
