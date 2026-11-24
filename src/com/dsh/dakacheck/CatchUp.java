@@ -22,6 +22,9 @@ import java.util.Calendar;
  */
 public final class CatchUp {
 
+    /** 考勤周期起点：04:00 → 次日 04:00。 */
+    static final int CYCLE_START_HOUR = 4;
+
     private CatchUp() {
     }
 
@@ -59,13 +62,32 @@ public final class CatchUp {
         }
     }
 
-    /** 今天的这个核对时刻是否已经过去。 */
+    /**
+     * 本次核对是否已经到时间。
+     *
+     * 考勤周期是 04:00 → 次日 04:00。
+     * 签退核对时刻通常在凌晨（02:30），它检查的是「当前考勤周期那一天」的签退。
+     *
+     * 例：11-24 08:48 上班，其签退要到 <b>11-25 02:30</b> 才核对。
+     * 因此 11-24 白天（04:00 之后）绝不能就判定「没签退」，否则下午一解锁就会误响铃。
+     */
     private static boolean passed(Context c, Calendar now, boolean kindIn) {
         int h = kindIn ? Config.inHour(c) : Config.outHour(c);
         int m = kindIn ? Config.inMin(c) : Config.outMin(c);
         int nowMin = now.get(Calendar.HOUR_OF_DAY) * 60 + now.get(Calendar.MINUTE);
         int targetMin = h * 60 + m;
-        // 下班卡默认 02:00，属于「凌晨」，当天的 02:00 已经过了就算过了
+        int cycle = CYCLE_START_HOUR * 60;
+
+        if (kindIn) {
+            // 上班卡：当天的核对时刻过了就算过了
+            return nowMin >= targetMin;
+        }
+
+        // 签退卡：只有「凌晨 04:00 前」才可能已经到时间。
+        // 04:00 之后的白天时间，签退核对要等到次日凌晨，现在不能提前核对。
+        if (nowMin >= cycle) {
+            return false;
+        }
         return nowMin >= targetMin;
     }
 
