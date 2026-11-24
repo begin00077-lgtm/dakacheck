@@ -1041,9 +1041,17 @@ public class HoursPage extends BasePage {
             int workdays = 0;
             java.util.List<String[]> rows = new java.util.ArrayList<String[]>();
             double running = 0;
+            String todayStr = String.format(Locale.CHINA, "%04d-%02d-%02d", curY, curM, curD);
             for (int d = 1; d <= lastDay; d++) {
                 String date = String.format(Locale.CHINA, "%04d-%02d-%02d", y, m, d);
                 if (!CheckReceiver.isWorkday(ctx, date)) continue;
+
+                // 今天还没签退：这一天还没结束，不计入「应出勤」
+                // 否则下午一看就会显示「还差 8 小时」，很吓人
+                boolean todayUnfinished = date.equals(todayStr)
+                        && (Store.getIn(ctx, date) != null)
+                        && (Store.getOut(ctx, date) == null);
+
                 workdays++;
                 Double hh = Work.hoursOf(ctx, date);
                 double got = hh == null ? 0.0 : hh;
@@ -1060,7 +1068,12 @@ public class HoursPage extends BasePage {
             }
             dailyRows = rows;
 
-            double need = workdays * 8.0;
+            // 计算应出勤时，今天未签退则不计入
+            int requiredDays = workdays;
+            boolean todayPending = (Store.getIn(ctx, todayStr) != null)
+                    && (Store.getOut(ctx, todayStr) == null);
+            if (todayPending) requiredDays--;
+            double need = requiredDays * 8.0;
             double diff = total - need;
 
             String sign = diff >= 0 ? "+" : "-";

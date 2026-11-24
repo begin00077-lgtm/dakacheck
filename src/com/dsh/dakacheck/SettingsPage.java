@@ -594,8 +594,16 @@ public class SettingsPage extends BasePage {
                         if (fErr != null) {
                             Toast.makeText(ctx, "下载失败：" + fErr,
                                     Toast.LENGTH_LONG).show();
+                            Notify.info(ctx, "下载失败",
+                                    "无法下载更新包：" + fErr);
                             return;
                         }
+                        // 先告知文件位置，万一安装界面没弹出也能自己找到
+                        Toast.makeText(ctx,
+                                "已下载到：Download/打卡提醒-更新.apk",
+                                Toast.LENGTH_LONG).show();
+                        Notify.info(ctx, "新版本已下载",
+                                "安装包在文件管理器→Download→「打卡提醒-更新.apk」");
                         installApk(fOut);
                     }
                 });
