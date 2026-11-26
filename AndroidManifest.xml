@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     package="com.dsh.dakacheck"
-    android:versionCode="831"
-    android:versionName="8.3.1">
+    android:versionCode="832"
+    android:versionName="8.3.2">
 
     <uses-sdk android:minSdkVersion="26" android:targetSdkVersion="34" />
 
@@ -227,6 +227,15 @@
             android:authorities="com.dsh.dakacheck.apk"
             android:exported="false"
             android:grantUriPermissions="true" />
+
+        <service
+            android:name=".RingService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="定时响铃提醒用户打卡" />
+        </service>
 
         <receiver
             android:name=".InstallResultReceiver"

@@ -10,7 +10,7 @@ import android.os.Build;
 
 /** 通知 + 全屏闹钟页。Android 10+ 后台不能直接起 Activity，用 fullScreenIntent 拉起来。 */
 public final class Notify {
-    public static final String CH_ALARM = "alarm";
+    public static final String CH_ALARM = "alarm_v2";
     public static final String CH_INFO = "info";
     public static final String CH_UNKNOWN = "unknown";
     private static final int ID_ALARM = 2001;
@@ -39,8 +39,15 @@ public final class Notify {
         NotificationManager nm = (NotificationManager) c.getSystemService(Context.NOTIFICATION_SERVICE);
         if (nm == null) return;
         NotificationChannel a = new NotificationChannel(CH_ALARM, "打卡响铃", NotificationManager.IMPORTANCE_HIGH);
-        a.setSound(null, null);
-        a.enableVibration(false);
+        // 注意：渠道一旦创建，声音/震动就不能再改，所以旧版本用过 "alarm" 的机器必须换新 ID。
+        a.setSound(android.media.RingtoneManager.getDefaultUri(
+                android.media.RingtoneManager.TYPE_ALARM),
+                new android.media.AudioAttributes.Builder()
+                        .setUsage(android.media.AudioAttributes.USAGE_ALARM)
+                        .setContentType(android.media.AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                        .build());
+        a.enableVibration(true);
+        a.setVibrationPattern(new long[]{0, 800, 600});
         a.setLockscreenVisibility(Notification.VISIBILITY_PUBLIC);
         a.setBypassDnd(true);
         nm.createNotificationChannel(a);
@@ -77,11 +84,13 @@ public final class Notify {
         NotificationManager nm = (NotificationManager) c.getSystemService(Context.NOTIFICATION_SERVICE);
         if (nm != null) nm.notify(ID_ALARM, b.build());
 
-        // 有后台起 Activity 权限时这条会直接生效，没有则靠上面的全屏通知
+        // ⚠ Android 10+ 后台禁止 startActivity，靠它响铃经常失败。
+        // 改由前台服务 RingService 发声 + 震动，不依赖 Activity 能不能拉起。
         try {
             c.startActivity(it);
         } catch (Exception ignored) {
         }
+        RingService.start(c, title, body, kind);
     }
 
     public static void info(Context c, String title, String body) {

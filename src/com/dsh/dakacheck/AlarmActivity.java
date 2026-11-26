@@ -148,6 +148,16 @@ public class AlarmActivity extends Activity {
     }
 
     private void startRing() {
+        // 声音由 RingService 负责；这里只保证服务在跑
+        // （万一通知没把服务拉起，这里补一次）
+        if (!RingService.ringing) {
+            String t = getIntent().getStringExtra(EXTRA_TITLE);
+            String b = getIntent().getStringExtra(EXTRA_BODY);
+            String k = getIntent().getStringExtra(EXTRA_KIND);
+            RingService.start(this, t == null ? "该打卡了" : t,
+                    b == null ? "" : b, k);
+            return;
+        }
         try {
             AudioManager am = (AudioManager) getSystemService(AUDIO_SERVICE);
             if (am != null) {
@@ -193,6 +203,7 @@ public class AlarmActivity extends Activity {
         if (vibrator != null) {
             vibrator.cancel();
         }
+        RingService.stop(this);
         Notify.cancelAlarm(this);
     }
 
